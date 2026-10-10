@@ -227,17 +227,16 @@ export async function loadGames() {
     },
   });
 
-  // Practice games need the computer's full attention (Maia); the analysis waits meanwhile.
-  useApp.subscribe((s, prev) => {
-    if (s.view === prev.view) return;
-    holdQueue(s.view === 'play');
-  });
-  holdQueue(useApp.getState().view === 'play');
   initWakeLock();
   kickQueue();
 }
 
 let held = false;
+
+/** A practice game in progress needs the computer's full attention (Maia, the clock): the analysis waits meanwhile. */
+export function holdForGame(playing: boolean) {
+  holdQueue(playing);
+}
 
 function holdQueue(hold: boolean) {
   if (hold === held) return;

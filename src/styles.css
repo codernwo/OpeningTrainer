@@ -2682,3 +2682,85 @@ a.btn {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
   z-index: 2;
 }
+
+/* ---------- Practice game clocks ---------- */
+
+/* The board with a clock above (the opponent) and below (you); a little smaller so both fit on a laptop screen. */
+.board-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.board-col.with-clocks {
+  --board: min(calc(100vh - 290px), calc(100vw - 560px), 680px);
+}
+
+.clock-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: var(--board);
+}
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  min-width: 5.5ch;
+  text-align: right;
+}
+
+.clock.running {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: inset 0 0 0 2px var(--mine);
+}
+
+.clock.low {
+  color: var(--gap);
+}
+
+.clock.low.running {
+  background: var(--gap-soft);
+  box-shadow: inset 0 0 0 2px var(--gap);
+}
+
+.tc-sliders {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  margin-top: 6px;
+}
+
+.tc-sliders label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 400;
+}
+
+.tc-sliders label.disabled {
+  opacity: 0.5;
+}
+
+@media (max-width: 900px) {
+  .board-col.with-clocks {
+    --board: min(calc(100vw - 58px), 560px);
+  }
+}
+
+@media (max-width: 600px) {
+  .tc-sliders {
+    grid-template-columns: 1fr;
+  }
+  .clock {
+    font-size: 20px;
+  }
+}

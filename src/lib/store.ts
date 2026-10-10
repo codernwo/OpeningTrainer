@@ -365,7 +365,8 @@ export const useApp = create<AppState>()((set, get) => {
 
     playFrom: (line, setup) => set({ playStart: line, playSetup: setup ?? null, view: 'play' }),
 
-    openGame: (id) => set({ openGameId: id, view: 'games' }),
+    // Practice games open under Play, the others under Games; closing a game stays where you are.
+    openGame: (id) => set(id ? { openGameId: id, view: id.includes('|practice:') ? 'play' : 'games' } : { openGameId: null }),
 
     setTrainDeck: (deck) => set({ trainDeck: deck }),
 

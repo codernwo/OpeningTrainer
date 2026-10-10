@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { divide, formatEval, isLearnable, JUDGMENT_NAMES, moveNo, summarize, type KeyMoment } from '../lib/analysis';
 import { needsAnalysis, pauseQueue, useAnalysisQueue } from '../lib/analyzer';
 import { START_KEY } from '../lib/chess';
-import { gameLabel, gameLine, outcome, SPEED_NAMES, type GameSpeed, type PlayedGame } from '../lib/games';
+import { gameLabel, gameLine, outcome, SPEED_NAMES, tcShort, type GameSpeed, type PlayedGame } from '../lib/games';
 import { gamesOf, lichessGamesWithoutClocks, useGames } from '../lib/gamesStore';
 import { fetchLichessGamesByIds } from '../lib/lichessGames';
 import { toPlayedGame } from '../lib/games';
@@ -57,7 +57,8 @@ function GamesList() {
   const mistakes = useApp((s) => s.data.mistakes);
   const all = useGames((s) => s.data);
   const queue = useAnalysisQueue();
-  const games = useMemo(() => gamesOf(all, profile.id), [all, profile.id]);
+  // Practice games against Maia have their own list under Play; they would skew what Insights says about your real games.
+  const games = useMemo(() => gamesOf(all, profile.id).filter((g) => g.source !== 'practice'), [all, profile.id]);
   const [importing, setImporting] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [speed, setSpeed] = useState<GameSpeed | null>(null);
@@ -292,7 +293,7 @@ export function AnalysisPill() {
 
 const RESULT_BADGE = { win: ['W', 'mine'], loss: ['L', 'gap'], draw: ['½', ''] } as const;
 
-function GameRow({ game, analysing }: { game: PlayedGame; analysing: boolean }) {
+export function GameRow({ game, analysing }: { game: PlayedGame; analysing: boolean }) {
   const openGame = useApp((s) => s.openGame);
   const o = outcome(game);
   const [letter, cls] = o ? RESULT_BADGE[o] : ['·', ''];
@@ -312,9 +313,9 @@ function GameRow({ game, analysing }: { game: PlayedGame; analysing: boolean }) 
         <b>{gameLabel(game)}</b>
         <span className="small muted">
           {game.myColor === 'white' ? '♔ White' : '♚ Black'}
-          {game.speed ? ` · ${SPEED_NAMES[game.speed]}` : ''}
+          {game.source === 'practice' ? ` · ${tcShort(game.timeControl) ?? 'no clock'}` : game.speed ? ` · ${SPEED_NAMES[game.speed]}` : ''}
           {game.opening ? ` · ${game.opening}` : ''}
-          {` · ${Math.ceil(game.moves.length / 2)} moves`}
+          {` · ${Math.ceil(game.moves.length / 2)} ${Math.ceil(game.moves.length / 2) === 1 ? 'move' : 'moves'}`}
         </span>
       </span>
       <span className="game-stats small">

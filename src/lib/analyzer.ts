@@ -99,7 +99,8 @@ export async function analyseGame(game: PlayedGame, opts: AnalyseOptions): Promi
 
   // 2. A deeper look at your worst moves (a slightly lower bar, as the deeper look may find more).
   const deep = new Map<number, { lines: EngineLine[]; after?: EngineLine }>();
-  for (const ply of candidateMoments(ev, side, 6, 10)) {
+  // A practice game started from a position: the moves before it were given, not played.
+  for (const ply of candidateMoments(ev, side, 6, 10).filter((p) => p >= (game.startPly ?? 0))) {
     check();
     const lines = (await opts.engine.analyse(keyToFen(keys[ply]), DEEP)).filter(Boolean);
     if (!lines.length) throw new Cancelled();

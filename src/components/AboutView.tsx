@@ -62,7 +62,10 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
             repertoire, train up to an early move first and go deeper step by step.
           </dd>
           <dt>Play</dt>
-          <dd>Practice games against Maia-3, a human-like opponent, at any rating from 600 to 2600.</dd>
+          <dd>
+            Practice games against Maia-3, a human-like opponent, at any rating from 600 to 2600, with or without a clock. Your
+            games are kept: analyse them and turn your mistakes into training cards.
+          </dd>
           <dt>Games</dt>
           <dd>
             The games you played, from Lichess or a PGN file, analysed on your device: where it went wrong, what was better and
@@ -150,7 +153,8 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
         <h2>Credits</h2>
         <p>
           Lichess (the chessground board, chessops, the opening database and cloud evaluations), Stockfish, Maia-3 by the CSSLab at
-          the University of Toronto, FSRS (ts-fsrs) and ONNX Runtime Web. The app as a whole is free software under the GNU GPL v3.
+          the University of Toronto, FSRS (ts-fsrs) and ONNX Runtime Web. The sounds were made by Enigmahack for Lichess (AGPL-3.0).
+          The app as a whole is free software under the GNU GPL v3.
         </p>
       </section>
 

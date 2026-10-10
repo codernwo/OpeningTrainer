@@ -19,6 +19,7 @@ import {
 import { buildQueue, counts, formatInterval, gradeCard, Rating, resetCards, State, type TrainItem } from '../lib/srs';
 import { activeRep, useApp } from '../lib/store';
 import { saveNow, type SaveResult } from '../lib/sync';
+import { playMoveSound } from '../lib/sound';
 import { tokensToShapes } from '../lib/shapes';
 import { Board, moveArrow, sideCircle, type Shape } from './Board';
 import { Dialog } from './Dialog';
@@ -443,6 +444,7 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
     later(() => {
       setPos(item.from);
       setLastMove(last ? uciToArrow(last.uci) : null);
+      if (last) playMoveSound(last);
       setPhase('await');
       if (item.kind === 'learn') {
         setShapes([moveArrow(item.uci, rep.side)]);
@@ -482,6 +484,7 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
     const m = moveFromBoard(pos, orig, dest);
     if (!m) return;
     const ok = movesAt(rep, item.from).some((x) => x.uci === m.uci);
+    playMoveSound(m);
     setPos(m.to);
     setLastMove(uciToArrow(m.uci));
     if (ok) {
@@ -700,6 +703,7 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
     later(() => {
       const m = moves[Math.floor(Math.random() * moves.length)];
       go(m.to, m.uci);
+      playMoveSound(m);
       setLine((l) => [...l, m.san]);
       setWaiting(false);
     }, 500);
@@ -710,6 +714,7 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
     const m = moveFromBoard(pos, orig, dest);
     if (!m) return;
     const expected = movesAt(rep, pos);
+    playMoveSound(m);
     if (expected.some((x) => x.uci === m.uci)) {
       triggerFlash('flash-good');
       setShapes([]);

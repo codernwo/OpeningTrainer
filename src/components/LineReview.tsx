@@ -5,6 +5,7 @@ import { edgeId, inTrainDepth, movesAt, myEdgesInOrder, ROOT, type PathStep, typ
 import { counts, gradeCard, Rating, State, type TrainItem } from '../lib/srs';
 import { useApp } from '../lib/store';
 import { saveNow, type SaveResult } from '../lib/sync';
+import { playMoveSound } from '../lib/sound';
 import { Board, moveArrow, sideCircle, type Shape } from './Board';
 import { Icon } from './Icon';
 import { SavedNote, saveMessage } from './SaveIndicator';
@@ -110,6 +111,7 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
         () => {
           setPos(m.to);
           setLastMove(uciToArrow(m.uci));
+          playMoveSound(m);
           setI((x) => x + 1);
         },
         m.mine ? 900 : 450,
@@ -144,6 +146,7 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
     if (!m) return;
     const target = lineTargets.current.has(current.id);
     const card = rep.cards[current.id];
+    playMoveSound(m);
     if (movesAt(rep, pos).some((x) => x.uci === m.uci)) {
       triggerFlash('flash-good');
       if (teaching) taught.current.add(current.id);

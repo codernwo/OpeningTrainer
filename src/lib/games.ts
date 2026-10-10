@@ -1,4 +1,5 @@
-// Games you played (imported from Lichess or a PGN file), kept apart from the repertoires: they are
+// Games you played (imported from Lichess or a PGN file, or practice games against Maia in this app), kept apart from
+// the repertoires: they are
 // stored per player, analysed by the engine (analysis.ts) and turned into training cards on request.
 import { parseComment, parsePgn, type Game, type PgnNodeData } from 'chessops/pgn';
 import { START_KEY, playSan, type PlayedMove, type Side } from './chess';
@@ -11,7 +12,7 @@ export interface PlayedGame {
   /** `<profile id>|<source id>`: the same game can belong to two players of this app (who played each other). */
   id: string;
   profileId: string;
-  source: 'lichess' | 'pgn';
+  source: 'lichess' | 'pgn' | 'practice';
   /** Where the game can be seen online, when known. */
   url?: string;
   white: string;
@@ -43,6 +44,17 @@ export interface PlayedGame {
   clocks?: (number | null)[];
   /** Mistakes (by half-move index) you chose not to train, so they are not suggested again. */
   dismissed?: number[];
+  /** Practice games started from a position (Play from here): the moves before this half-move were given, not
+   *  played, so the analysis looks for mistakes only after it. */
+  startPly?: number;
+}
+
+/** "300+3" → "5+3" (minutes + seconds), as people say it. */
+export function tcShort(tc: string | undefined): string | null {
+  const m = tc ? /^(\d+)\+(\d+)$/.exec(tc) : null;
+  if (!m) return null;
+  const min = Number(m[1]) / 60;
+  return `${Number.isInteger(min) ? min : min.toFixed(1)}+${m[2]}`;
 }
 
 export interface GamesData {

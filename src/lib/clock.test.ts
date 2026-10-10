@@ -1,0 +1,37 @@
+import { describe, expect, it } from 'vitest';
+import { flagged, newClock, press, runFor, showTime, stop, tcLabel, timeLeft } from './clock';
+
+describe('chess clock', () => {
+  it('starts with the first move, runs for the side to move, adds the increment after a move', () => {
+    let c = newClock({ minutes: 3, increment: 2 });
+    expect(timeLeft(c, 'white', 5000)).toBe(180_000); // nothing runs before the first move
+    c = press(c, 'white', 1000, 2000); // 1.e4: no time used, no increment yet
+    expect(c).toMatchObject({ white: 180_000, running: 'black' });
+    expect(timeLeft(c, 'black', 4000)).toBe(177_000);
+    c = press(c, 'black', 4000, 2000); // Black thought 3 s, gets 2 s back
+    expect(c).toMatchObject({ black: 179_000, running: 'white' });
+    c = press(c, 'white', 14_000, 2000);
+    expect(c.white).toBe(172_000);
+  });
+
+  it('a flag falls when the running clock reaches zero; a stopped clock keeps its time', () => {
+    let c = press(newClock({ minutes: 1, increment: 0 }), 'white', 0, 0);
+    expect(flagged(c, 59_999)).toBeNull();
+    expect(flagged(c, 60_000)).toBe('black');
+    c = stop(c, 30_000);
+    expect(c).toMatchObject({ black: 30_000, running: null });
+    expect(flagged(c, 999_999)).toBeNull();
+    c = runFor(c, 'black', 40_000);
+    expect(timeLeft(c, 'black', 41_000)).toBe(29_000);
+  });
+
+  it('shows the time as on Lichess', () => {
+    expect(showTime(300_000)).toBe('5:00');
+    expect(showTime(42_300)).toBe('0:43');
+    expect(showTime(9_340)).toBe('0:09.3');
+    expect(showTime(-5)).toBe('0:00.0');
+    expect(showTime(3_600_000)).toBe('1:00:00');
+    expect(tcLabel({ minutes: 0, increment: 5 })).toBe('No clock');
+    expect(tcLabel({ minutes: 5, increment: 3 })).toBe('5+3');
+  });
+});

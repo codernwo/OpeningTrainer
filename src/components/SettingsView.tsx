@@ -5,6 +5,7 @@ import { exportPgn } from '../lib/pgn';
 import { getLichessUser, getToken, logout, RATING_BUCKETS, ratingLabel, setToken, SPEED_LABELS, SPEEDS, startLogin, verifyToken } from '../lib/lichess';
 import { isMaiaDownloaded, removeMaia } from '../lib/maia';
 import { stats } from '../lib/repertoire';
+import { playSound, setSoundSet, SOUND_SET_NAMES, SOUND_SETS, soundSet, type SoundSet } from '../lib/sound';
 import { connectDrive, disconnectDrive, driveBackups, loadDriveBackup, reconnectDrive, syncNow, useSync } from '../lib/sync';
 import { useGames } from '../lib/gamesStore';
 import { activeRep, exportBackup, parseBackup, PROFILE_COLORS, profileRating, useApp, type AppData, type Profile } from '../lib/store';
@@ -253,6 +254,7 @@ export function SettingsView() {
       </div>
 
       <MaiaCard />
+      <SoundCard />
 
       <div className="card">
         <div className="section">
@@ -440,6 +442,45 @@ export function SyncBadge() {
   };
   const [cls, label] = map[status] ?? ['', status];
   return <span className={`badge ${cls}`}>{label}</span>;
+}
+
+/** Sound for moves and games: one of the free Lichess sound sets, or none. Per device. */
+function SoundCard() {
+  const [set, setSet] = useState<SoundSet>(soundSet);
+  const choose = (s: SoundSet) => {
+    setSet(s);
+    setSoundSet(s);
+    if (s !== 'off') {
+      playSound('Move', s);
+      setTimeout(() => playSound('Capture', s), 450);
+    }
+  };
+  return (
+    <div className="card">
+      <div className="section">
+        <h2>Sound</h2>
+      </div>
+      <div className="section stack" style={{ gap: 10 }}>
+        <div className="row wrap" style={{ gap: 6 }}>
+          {[...SOUND_SETS, 'off' as const].map((s) => (
+            <span key={s} className={`chip ${set === s ? 'on' : ''}`} onClick={() => choose(s)}>
+              {SOUND_SET_NAMES[s]}
+            </span>
+          ))}
+          {set !== 'off' && (
+            <button className="btn sm ghost" onClick={() => choose(set)} title="Hear a move and a capture">
+              <Icon name="play" size={14} /> Listen
+            </button>
+          )}
+        </div>
+        <div className="help">
+          Moves, captures and checks while you play and train, the start and end of a practice game, and a warning when
+          your clock runs low. The sounds were made by Enigmahack for Lichess (AGPL-3.0); Lichess' own default sounds are
+          not free to reuse, so they are not here. This choice is kept on this device.
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MaiaCard() {
