@@ -236,6 +236,13 @@ here*) or without a clock is casual.
 Under Play, **Your rating against Maia** shows the four ratings; pick one for its **graph**: the rating after each
 game, with a band for its uncertainty (± RD) that narrows as you play. Hover a point for the game, click to open it.
 
+**Runs.** *New run…* starts every rating again at 400 — a speedrun, or a fresh start to learn a new opening — while
+the earlier runs stay, with their games and graphs, to look back on (pick one above the ratings). A run can have a
+name and be about one of your repertoires: it is then played with that repertoire's colour, and shows how long your
+rated games with that colour stayed in your preparation and who left it first, you or Maia. Each run shows its games,
+wins, draws and losses, and its peak. A run is a starting point in time, stored with the player (and synced): a rated
+game belongs to the run that was going when it ended. Started one by mistake? *Undo* in the message that follows.
+
 A caveat: this Maia picks its moves the way a person might rather than always its first choice, so it is a bit weaker
 than the "Maia 1500" bots on Lichess. The rating is a scale of its own — useful to follow your progress against the
 same opponent, close to Lichess ratings but not the same.

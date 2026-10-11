@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PlayedGame } from './games';
-import { categoryOf, categoryOfPgn, glickoUpdate, PROVISIONAL_RD, ratingsFrom, START } from './rating';
+import { categoryOf, categoryOfPgn, glickoUpdate, PROVISIONAL_RD, ratingsByRun, ratingsFrom, runsOf, START } from './rating';
 
 const DAY = 86_400_000;
 
@@ -142,5 +142,47 @@ describe('ratings from your rated games', () => {
     expect(r.rating).toBeGreaterThan(1100);
     expect(r.rd).toBeLessThan(PROVISIONAL_RD);
     expect(r.provisional).toBe(false);
+  });
+});
+
+describe('runs: start again at 400', () => {
+  const T = 1_700_000_000_000;
+  const at = (n: number, opts: Partial<PlayedGame> & { score?: 1 | 0.5 | 0; level?: number } = {}) => game(n, { playedAt: T + n * DAY, ...opts });
+
+  it('the first run is there from the beginning; later runs in the order started', () => {
+    expect(runsOf(undefined).map((r) => r.id)).toEqual(['first']);
+    const runs = runsOf([
+      { id: 'b', name: 'B', startedAt: T + 20 * DAY },
+      { id: 'a', name: 'A', startedAt: T + 10 * DAY },
+    ]);
+    expect(runs.map((r) => r.id)).toEqual(['first', 'a', 'b']);
+  });
+
+  it('a game belongs to the run going when it was played; each run starts at 400', () => {
+    const games = [at(1, { level: 900 }), at(2, { level: 900 }), at(11, { score: 0 }), at(12, { level: 1200 }), at(13, { score: 0.5 })];
+    const runs = ratingsByRun(games, runsOf([{ id: 'speedrun', name: 'Speedrun', startedAt: T + 10 * DAY }]));
+    expect(runs.map((r) => r.games.length)).toEqual([2, 3]);
+    expect(runs[1].ratings.byGame.get('p|practice:11')!.before).toBe(400);
+    expect(runs[0].ratings.byCategory.blitz.rating).toBeGreaterThan(700);
+    expect(runs[1].record).toEqual({ won: 1, drawn: 1, lost: 1 });
+    expect(runs[0].record).toEqual({ won: 2, drawn: 0, lost: 0 });
+  });
+
+  it('the peak is the highest rating reached in the run', () => {
+    const runs = ratingsByRun([at(1, { level: 1500 }), at(2, { score: 0, level: 600 }), at(3, { score: 0, level: 600 })], runsOf(undefined));
+    const steps = [...runs[0].ratings.byGame.values()].map((s) => s.after);
+    expect(runs[0].peak!.rating).toBe(Math.max(...steps));
+    expect(runs[0].peak!.rating).toBeGreaterThan(runs[0].ratings.byCategory.blitz.rating);
+  });
+
+  it('no peak while never above the start', () => {
+    expect(ratingsByRun([at(1, { score: 0 }), at(2, { score: 0 })], runsOf(undefined))[0].peak).toBeNull();
+  });
+
+  it('a run without games yet: every rating at 400', () => {
+    const runs = ratingsByRun([at(1)], runsOf([{ id: 'new', name: 'New', startedAt: T + 5 * DAY }]));
+    expect(runs[1].games).toEqual([]);
+    expect(runs[1].ratings.byCategory.rapid).toMatchObject({ rating: 400, games: 0 });
+    expect(runs[1].peak).toBeNull();
   });
 });

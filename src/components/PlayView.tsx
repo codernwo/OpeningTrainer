@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatLine, keyToFen, moveFromBoard, posFromFen, START_KEY, turnOfKey, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
 import { flagged, hasClock, newClock, press, resumedClock, runFor, showTime, stop, tcLabel, tcPgn, timeLeft, type ClockState, type TimeControl } from '../lib/clock';
-import { gameId, speedFromTimeControl, type GameResult, type PlayedGame } from '../lib/games';
-import { flushGames, holdForGame, useGames, useRatings } from '../lib/gamesStore';
-import { CATEGORY_NAMES, categoryOf, RATING_CATEGORIES, showRating, stakes, type CategoryRating, type RatingCategory, type Ratings } from '../lib/rating';
+import { formatDate, gameId, speedFromTimeControl, type GameResult, type PlayedGame } from '../lib/games';
+import { flushGames, holdForGame, useGames, useRatings, type PlayerRatings } from '../lib/gamesStore';
+import { positionKeys, prepCheck } from '../lib/insights';
+import { CATEGORY_NAMES, categoryOf, RATING_CATEGORIES, runsOf, showRating, stakes, type CategoryRating, type RatingCategory, type RatingRun, type Ratings } from '../lib/rating';
 import { useAnalysisQueue } from '../lib/analyzer';
 import { playMoveSound, playSound } from '../lib/sound';
 import { capturedBy, materialBalance, type Captured } from '../lib/material';
@@ -11,10 +12,11 @@ import { createElement } from 'react';
 import { loadMaia, MAIA_DOWNLOAD_MB, MAIA_MAX, MAIA_MIN, isMaiaDownloaded, useMaia } from '../lib/maia';
 import { chooseOpponentMove, type MoveSource, type OpponentSettings } from '../lib/opponent';
 import { findMove, movesAt, type Repertoire } from '../lib/repertoire';
-import { activeProfile, activeRep, profileRating, useApp } from '../lib/store';
+import { activeProfile, activeRep, profileRating, useApp, type Profile } from '../lib/store';
 import { engine } from '../lib/engine';
 import { getToken } from '../lib/lichess';
 import { Board } from './Board';
+import { Dialog } from './Dialog';
 import { GameReview } from './GameReview';
 import { GameRow } from './GamesView';
 import { OpeningLabel } from './OpeningLabel';
@@ -291,23 +293,70 @@ function PlayHistory({ ratings }: { ratings: Ratings }) {
   );
 }
 
-/** Your rating against Maia per tempo, once you have played rated games; pick a tempo for its graph. */
-function RatingCard({ ratings, preferred }: { ratings: Ratings; preferred: RatingCategory | null }) {
-  const profileId = useApp((s) => s.data.activeProfileId);
+/** Your rating against Maia per tempo, run by run; pick a tempo for its graph, an earlier run to look back on, or
+ *  start a new run. */
+function RatingCard({ ratings, preferred }: { ratings: PlayerRatings; preferred: RatingCategory | null }) {
+  const profile = useApp(activeProfile)!;
+  const reps = useApp((s) => s.data.repertoires);
   const all = useGames((s) => s.data.games);
-  const games = useMemo(() => all.filter((g) => g.profileId === profileId && g.source === 'practice'), [all, profileId]);
-  const played = RATING_CATEGORIES.filter((c) => ratings.byCategory[c].games);
-  // The tempo chosen in the setup when it has games, else the one played last.
-  const latest = played.slice().sort((a, b) => (ratings.byCategory[b].lastPlayed ?? 0) - (ratings.byCategory[a].lastPlayed ?? 0))[0];
+  const games = useMemo(() => all.filter((g) => g.profileId === profile.id && g.source === 'practice'), [all, profile.id]);
+  const [viewed, setViewed] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [picked, setPicked] = useState<RatingCategory | null>(null);
-  const shown = picked && ratings.byCategory[picked].games ? picked : preferred && ratings.byCategory[preferred].games ? preferred : latest;
-  if (!played.length) return null;
+  const shownRun = ratings.runs.find((r) => r.run.id === viewed) ?? ratings.current;
+  const byCategory = shownRun.ratings.byCategory;
+  const played = RATING_CATEGORIES.filter((c) => byCategory[c].games);
+  // The tempo chosen in the setup when it has games, else the one played last.
+  const latest = played.slice().sort((a, b) => (byCategory[b].lastPlayed ?? 0) - (byCategory[a].lastPlayed ?? 0))[0];
+  const shown = picked && byCategory[picked].games ? picked : preferred && byCategory[preferred].games ? preferred : latest;
+  const book = useMemo(() => {
+    const rep = shownRun.run.repId ? reps.find((r) => r.id === shownRun.run.repId) : undefined;
+    return rep ? { rep, ...bookStats(shownRun.games, rep) } : null;
+  }, [shownRun, reps]);
+  if (!ratings.runs.some((r) => r.games.length) && ratings.runs.length === 1) return null;
+  const isCurrent = shownRun === ratings.current;
+  const { won, drawn, lost } = shownRun.record;
+  const repName = (id?: string) => reps.find((r) => r.id === id)?.name;
   return (
     <div className="card card-pad stack">
-      <h3>Your rating against Maia</h3>
+      <div className="row wrap">
+        <h3>Your rating against Maia</h3>
+        <span className="spacer" />
+        <button className="btn sm" onClick={() => setCreating(true)} title="Start all ratings again at 400; this run stays to look back on">
+          <Icon name="refresh" size={14} /> New run…
+        </button>
+      </div>
+      {ratings.runs.length > 1 && (
+        <div className="row wrap" style={{ gap: 6 }} role="tablist" aria-label="Runs">
+          {ratings.runs.map((r) => (
+            <span
+              key={r.run.id}
+              role="tab"
+              aria-selected={r === shownRun}
+              className={`chip ${r === shownRun ? 'on' : ''}`}
+              onClick={() => {
+                setViewed(r === ratings.current ? null : r.run.id);
+                setPicked(null);
+              }}
+            >
+              {r.run.name}
+              {r === ratings.current ? ' · now' : ''}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="small muted run-summary">
+        <b>{shownRun.run.name}</b>
+        {repName(shownRun.run.repId) ? ` · ${repName(shownRun.run.repId)}` : ''}
+        {shownRun.run.startedAt ? ` · started ${formatDate(shownRun.run.startedAt)}` : ''}
+        {` · ${shownRun.games.length} ${shownRun.games.length === 1 ? 'game' : 'games'}`}
+        {shownRun.games.length ? ` · ${won} won, ${drawn} drawn, ${lost} lost` : ''}
+        {shownRun.peak ? ` · peak ${Math.round(shownRun.peak.rating)} (${CATEGORY_NAMES[shownRun.peak.category].toLowerCase()})` : ''}
+        {!isCurrent ? ' · finished' : ''}
+      </div>
       <div className="rating-tiles" role="tablist">
         {RATING_CATEGORIES.map((c) => {
-          const r = ratings.byCategory[c];
+          const r = byCategory[c];
           return (
             <button
               key={c}
@@ -326,13 +375,113 @@ function RatingCard({ ratings, preferred }: { ratings: Ratings; preferred: Ratin
           );
         })}
       </div>
-      {shown && <RatingChart ratings={ratings} category={shown} games={games} />}
+      {shown ? (
+        <RatingChart ratings={shownRun.ratings} category={shown} games={games} />
+      ) : (
+        <div className="small faint">No rated games in this run yet: every rating starts at 400.</div>
+      )}
+      {book && (
+        <div className="notice small book-stats">
+          <b>
+            {book.rep.name} ({book.rep.side === 'white' ? '♔ White' : '♚ Black'})
+          </b>
+          {book.games ? (
+            <>
+              {' '}
+              · {book.games} {book.games === 1 ? 'game' : 'games'} with {book.rep.side}: in your preparation for{' '}
+              <b>{book.avgMoves.toFixed(1)}</b> moves on average · <b>you left it</b> {book.youLeft}× · Maia left it {book.theyLeft}× ·
+              end of your preparation {book.end}×
+            </>
+          ) : (
+            <> · no rated games with {book.rep.side} in this run yet.</>
+          )}
+        </div>
+      )}
       <div className="help">
-        Glicko-2, as on Lichess, one rating per tempo; everyone starts at 400. A “?” means provisional: not enough games
+        Glicko-2, as on Lichess, one rating per tempo; every run starts at 400. A “?” means provisional: not enough games
         yet to be sure, so the rating still moves in big steps. Maia here plays like a person (it does not always play its
         favourite move), so this is a rating on its own scale, close to Lichess but not the same.
       </div>
+      {creating && <NewRunDialog profile={profile} runs={ratings.runs.length} onClose={() => setCreating(false)} />}
     </div>
+  );
+}
+
+/** How the rated games of a run with the repertoire's colour followed it: for how many moves, and who left it first. */
+function bookStats(games: readonly PlayedGame[], rep: Repertoire) {
+  let n = 0;
+  let plies = 0;
+  let youLeft = 0;
+  let theyLeft = 0;
+  let end = 0;
+  for (const g of games) {
+    if (g.myColor !== rep.side) continue;
+    const c = prepCheck(g.moves, positionKeys(g.moves), [rep], rep.side);
+    n++;
+    if (c.kind === 'none') continue;
+    plies += c.ply;
+    if (c.kind === 'you-left') youLeft++;
+    else if (c.kind === 'opponent-left') theyLeft++;
+    else end++;
+  }
+  return { games: n, avgMoves: n ? plies / n / 2 : 0, youLeft, theyLeft, end };
+}
+
+/** A new run: all ratings start again at 400; optionally named, and about one of your repertoires. */
+function NewRunDialog({ profile, runs, onClose }: { profile: Profile; runs: number; onClose: () => void }) {
+  const allReps = useApp((s) => s.data.repertoires);
+  const reps = useMemo(() => allReps.filter((r) => r.profileId === profile.id), [allReps, profile.id]);
+  const { updateProfile, showToast } = useApp.getState();
+  const [name, setName] = useState('');
+  const [repId, setRepId] = useState('');
+  const start = () => {
+    const run: RatingRun = { id: crypto.randomUUID(), name: name.trim() || `Run ${runs + 1}`, startedAt: Date.now(), ...(repId ? { repId } : {}) };
+    updateProfile(profile.id, { ratingRuns: [...(profile.ratingRuns ?? []), run] });
+    onClose();
+    showToast(`${run.name} started: every rating at 400`, {
+      label: 'Undo',
+      run: () => {
+        const p = useApp.getState().data.profiles.find((x) => x.id === profile.id);
+        if (p) updateProfile(p.id, { ratingRuns: (p.ratingRuns ?? []).filter((r) => r.id !== run.id) });
+      },
+    });
+  };
+  return (
+    <Dialog title="Start a new run" onClose={onClose}>
+      <div className="stack" style={{ gap: 12 }}>
+        <div className="small">
+          Every rating (bullet, blitz, rapid, classical) starts again at 400, as in a speedrun: beat stronger and stronger
+          bots to climb. Your earlier runs stay, with their games and graphs, to look back on.
+        </div>
+        <div className="field">
+          <label className="small">Name</label>
+          <input className="input" autoFocus value={name} placeholder={`e.g. Caro-Kann speedrun (or “Run ${runs + 1}”)`} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="field">
+          <label className="small">About an opening (optional)</label>
+          <select className="input" value={repId} onChange={(e) => setRepId(e.target.value)}>
+            <option value="">No particular opening</option>
+            {reps.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name} ({r.side === 'white' ? 'White' : 'Black'})
+              </option>
+            ))}
+          </select>
+          <div className="help">
+            For a new opening: the run shows how long your rated games with its colour stayed in your preparation, and who
+            left it first — you or Maia. New games are played with its colour.
+          </div>
+        </div>
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn primary" onClick={start}>
+            Start the run
+          </button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 
@@ -342,6 +491,8 @@ function RatedSetting(props: {
   canRate: boolean;
   reason: string;
   current: CategoryRating;
+  /** The name of the current run (after the first). */
+  run: string | null;
   category: string;
   level: number;
   white: boolean;
@@ -360,6 +511,7 @@ function RatedSetting(props: {
         {canRate && (
           <span className="muted">
             · your {props.category} rating <b className="num">{showRating(current)}</b>
+            {props.run ? ` · ${props.run}` : ''}
           </span>
         )}
       </label>
@@ -400,7 +552,14 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
   const clampLevel = (r: number) => Math.min(MAIA_MAX, Math.max(MAIA_MIN, Math.round(r / 100) * 100));
   // From a game review: the opponent's rating in that game.
   const [level, setLevel] = useState(setup?.level ? clampLevel(setup.level) : (prefs.level ?? clampLevel(profileRating(profile))));
-  const [color, setColor] = useState<Side>(setup?.color ?? rep?.side ?? 'white');
+  // A run about an opening is played with that repertoire's colour.
+  const run = runsOf(profile.ratingRuns).at(-1)!;
+  const runRep = useApp((s) => (run.repId ? s.data.repertoires.find((r) => r.id === run.repId) : undefined));
+  const [color, setColor] = useState<Side>(setup?.color ?? runRep?.side ?? rep?.side ?? 'white');
+  useEffect(() => {
+    if (runRep && !setup?.color) setColor(runRep.side);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.id]);
   const [mode, setMode] = useState<OpponentSettings['mode']>(prefs.mode ?? 'realistic');
   const [coach, setCoach] = useState(prefs.coach ?? true);
   const [tc, setTc] = useState<TimeControl>(prefs.tc ?? { minutes: 0, increment: 0 });
@@ -526,6 +685,7 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
           canRate={canRate}
           reason={!category ? 'Rated games need a clock.' : 'Rated games start from the starting position; this one is casual.'}
           current={current}
+          run={run.id === 'first' ? null : run.name}
           category={category ? CATEGORY_NAMES[category].toLowerCase() : ''}
           level={shownLevel}
           white={color === 'white'}

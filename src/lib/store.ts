@@ -2,6 +2,7 @@
 // syncs to Google Drive, see sync.ts). Every repertoire change goes through
 // `updateRep` so it can be undone and so its `updatedAt` (last edit, not training) is bumped for syncing.
 import { create } from 'zustand';
+import type { RatingRun } from './rating';
 import { createStore, get as idbGet, set as idbSet } from 'idb-keyval';
 import { playSan, type PlayedMove, type Side } from './chess';
 import { findMove, findPath, newRepertoire, onlyCardsChanged, ROOT, type Repertoire } from './repertoire';
@@ -26,6 +27,8 @@ export interface Profile {
   lichessRating?: { user: string; rating: number; speed: string; games: number; provisional: boolean; at: number };
   /** The own rating is typed in by hand even though there is a Lichess username. */
   ratingManual?: boolean;
+  /** Rating runs against Maia started after the first (see rating.ts): each starts all ratings again at 400. */
+  ratingRuns?: RatingRun[];
   /** Names the player uses in PGN files of their games (other sites, over-the-board), to tell their colour. */
   aliases?: string[];
   /** The order of the player's repertoires on the Overview (ids); others follow in the order they were made. */

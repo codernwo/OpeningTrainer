@@ -2933,3 +2933,10 @@ button.rating-tile:disabled {
   background: var(--accent);
   opacity: 0.25;
 }
+
+.run-summary b {
+  color: var(--text);
+}
+.book-stats {
+  line-height: 1.6;
+}

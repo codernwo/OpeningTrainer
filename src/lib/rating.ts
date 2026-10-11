@@ -172,3 +172,52 @@ export function stakes(r: CategoryRating, opponent: number, white: boolean, now 
   const diff = (score: number) => Math.round(glickoUpdate(r, opponent, score, { white, days }).rating) - Math.round(r.rating);
   return { win: diff(1), draw: diff(0.5), loss: diff(0) };
 }
+
+// ---------------------------------------------------------------------------
+// Runs: start again at 400 (a "speedrun", or a new opening), keeping the earlier runs to look back on. A run is a
+// starting point in time: a rated game belongs to the run that was going when it ended.
+
+export interface RatingRun {
+  id: string;
+  name: string;
+  startedAt: number;
+  /** The repertoire this run is about (a new opening to learn), if any. */
+  repId?: string;
+}
+
+/** Every player has a first run, from the beginning. */
+export const FIRST_RUN: RatingRun = { id: 'first', name: 'Run 1', startedAt: 0 };
+
+export function runsOf(started: readonly RatingRun[] | undefined): RatingRun[] {
+  return [FIRST_RUN, ...[...(started ?? [])].sort((a, b) => a.startedAt - b.startedAt)];
+}
+
+export interface RunRatings {
+  run: RatingRun;
+  ratings: Ratings;
+  /** Its rated games, in the order played. */
+  games: PlayedGame[];
+  record: { won: number; drawn: number; lost: number };
+  /** The highest rating reached above the start (any tempo), and in which tempo; null while never above 400. */
+  peak: { rating: number; category: RatingCategory } | null;
+}
+
+export function ratingsByRun(games: readonly PlayedGame[], runs: readonly RatingRun[]): RunRatings[] {
+  const rated = games.filter(isRatedGame).sort((a, b) => a.playedAt - b.playedAt || a.id.localeCompare(b.id));
+  return runs.map((run, i) => {
+    const end = runs[i + 1]?.startedAt ?? Infinity;
+    const mine = rated.filter((g) => g.playedAt >= run.startedAt && g.playedAt < end);
+    const ratings = ratingsFrom(mine);
+    const record = { won: 0, drawn: 0, lost: 0 };
+    for (const g of mine) {
+      const win = g.myColor === 'white' ? '1-0' : '0-1';
+      if (g.result === win) record.won++;
+      else if (g.result === '1/2-1/2') record.drawn++;
+      else record.lost++;
+    }
+    let peak: RunRatings['peak'] = null;
+    for (const step of ratings.byGame.values())
+      if (step.after > START.rating && (!peak || step.after > peak.rating)) peak = { rating: step.after, category: step.category };
+    return { run, ratings, games: mine, record, peak };
+  });
+}

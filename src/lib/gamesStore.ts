@@ -6,7 +6,7 @@ import { createStore, get as idbGet, set as idbSet } from 'idb-keyval';
 import { configureQueue, kickQueue, needsAnalysis, needsMaia, queueStateChanged, ratingFor, skipCurrent, useAnalysisQueue } from './analyzer';
 import type { GameAnalysis } from './analysis';
 import { EMPTY_GAMES, type GamesData, type PlayedGame } from './games';
-import { ratingsFrom, type Ratings } from './rating';
+import { ratingsByRun, runsOf, type Ratings, type RunRatings } from './rating';
 import { profileRating, useApp } from './store';
 import { initWakeLock } from './wakeLock';
 
@@ -104,10 +104,27 @@ export function lichessGamesWithoutClocks(games: readonly PlayedGame[]): PlayedG
   return games.filter((g) => g.id.includes('|lichess:') && g.speed !== 'correspondence' && !g.clocks?.some((c) => c !== null));
 }
 
-/** A player's ratings against Maia, worked out from their rated practice games (see rating.ts). */
-export function useRatings(profileId: string | null): Ratings {
+export interface PlayerRatings extends Ratings {
+  /** Every run of this player, the current one last. */
+  runs: RunRatings[];
+  current: RunRatings;
+}
+
+/** A player's ratings against Maia, worked out from their rated practice games (see rating.ts): those of the current
+ *  run, and the rating change of every rated game in any run. */
+export function useRatings(profileId: string | null): PlayerRatings {
   const games = useGames((s) => s.data.games);
-  return useMemo(() => ratingsFrom(games.filter((g) => g.profileId === profileId)), [games, profileId]);
+  const started = useApp((s) => s.data.profiles.find((p) => p.id === profileId)?.ratingRuns);
+  return useMemo(() => {
+    const runs = ratingsByRun(
+      games.filter((g) => g.profileId === profileId),
+      runsOf(started),
+    );
+    const current = runs[runs.length - 1];
+    const byGame: Ratings['byGame'] = new Map();
+    for (const r of runs) for (const [id, step] of r.ratings.byGame) byGame.set(id, step);
+    return { byCategory: current.ratings.byCategory, byGame, runs, current };
+  }, [games, profileId, started]);
 }
 
 export function gamesOf(data: GamesData, profileId: string | null): PlayedGame[] {
