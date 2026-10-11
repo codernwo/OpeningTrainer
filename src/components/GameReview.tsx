@@ -176,6 +176,12 @@ export function GameReview({ game }: { game: PlayedGame }) {
 
   // A rated practice game: what it did to your rating. It stays (your rating is made of these games).
   const ratingStep = useRatings(game.profileId).byGame.get(game.id);
+  // The ratings in the title; in a rated game against Maia yours is your rating against Maia (before the game).
+  const elo = (c: 'white' | 'black') => {
+    if (ratingStep && c === game.myColor) return ` (${showRating({ rating: ratingStep.before, provisional: ratingStep.provisionalBefore })})`;
+    const e = c === 'white' ? game.whiteElo : game.blackElo;
+    return e ? ` (${e})` : '';
+  };
 
   const opp = opponentOf(game);
   const sym = (i: number) => {
@@ -212,8 +218,8 @@ export function GameReview({ game }: { game: PlayedGame }) {
         <div>
           <h2 className="review-title">
             {game.white}
-            {game.whiteElo ? ` (${game.whiteElo})` : ''} – {game.black}
-            {game.blackElo ? ` (${game.blackElo})` : ''}
+            {elo('white')} – {game.black}
+            {elo('black')}
           </h2>
           <div className="small muted">
             {game.result}

@@ -412,6 +412,12 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
   const isRated = rated && canRate;
   const current = ratings.byCategory[category ?? 'blitz'];
   const fair = clampLevel(current.rating);
+  // Rated games are a world of their own, apart from your Lichess (or typed-in) rating: the opponent starts at a fair
+  // level for your rating against Maia in this tempo, and a level chosen here is not remembered for casual games.
+  const [ratedPick, setRatedPick] = useState<number | null>(null);
+  useEffect(() => setRatedPick(null), [category]);
+  const shownLevel = isRated ? (ratedPick ?? fair) : level;
+  const chooseLevel = (l: number) => (isRated ? setRatedPick(l) : setLevel(l));
   const [downloaded, setDownloaded] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -430,14 +436,21 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
       // Stockfish is not needed while playing; free its memory for Maia (matters on phones and tablets).
       engine.terminate();
       await loadMaia();
-      // Rated: the opponent plays like real opponents (not into your preparation), and no hints.
+      // Rated: the opponent plays like real opponents (not into your preparation), and no hints. Maia also takes into
+      // account whom it plays; in a rated game it plays as against an equal, so "Maia 1200" is always the same
+      // opponent, whatever your other ratings (its rating is its level).
       onStart({
         start,
         color,
         coach: isRated ? false : coach,
         tc,
         rated: isRated,
-        settings: { level, playerRating: profileRating(profile), mode: isRated ? 'realistic' : mode, speeds: profile.speeds },
+        settings: {
+          level: shownLevel,
+          playerRating: isRated ? shownLevel : profileRating(profile),
+          mode: isRated ? 'realistic' : mode,
+          speeds: profile.speeds,
+        },
       });
     } catch (e) {
       setError((e as Error).message);
@@ -478,9 +491,9 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
 
         <div className="field">
           <label>
-            Opponent strength: <span className="num">{level}</span> <span className="muted">({levelName(level)})</span>
+            Opponent strength: <span className="num">{shownLevel}</span> <span className="muted">({levelName(shownLevel)})</span>
           </label>
-          <input type="range" min={MAIA_MIN} max={MAIA_MAX} step={100} value={level} onChange={(e) => setLevel(Number(e.target.value))} />
+          <input type="range" min={MAIA_MIN} max={MAIA_MAX} step={100} value={shownLevel} onChange={(e) => chooseLevel(Number(e.target.value))} />
           <div className="range-scale small faint">
             <span>{MAIA_MIN}</span>
             {/* Under the player's own rating on the slider, kept clear of the end labels. */}
@@ -514,11 +527,11 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
           reason={!category ? 'Rated games need a clock.' : 'Rated games start from the starting position; this one is casual.'}
           current={current}
           category={category ? CATEGORY_NAMES[category].toLowerCase() : ''}
-          level={level}
+          level={shownLevel}
           white={color === 'white'}
           fair={fair}
           onRated={setRated}
-          onLevel={setLevel}
+          onLevel={setRatedPick}
         />
 
         <div className="field">

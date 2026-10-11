@@ -27,7 +27,6 @@ import { ChoiceDialog, type Choice } from './Dialog';
 import { formatPct } from './ExplorerPanel';
 import { Icon } from './Icon';
 
-const ROW_H = 30;
 const BOX_H = 22;
 const PAD = 16;
 /** Horizontal room between columns: expand toggle plus the curve. */
@@ -37,8 +36,11 @@ const SMALL_FONT = '500 11px system-ui, sans-serif';
 const NAME_FONT = '600 10.5px system-ui, sans-serif';
 /** Room above a box for the opening name of the branch it starts. */
 const NAME_H = 14;
-/** Top-down: height of one level (box, toggle and the curve to the next level). */
-const LEVEL_H = 64;
+/** Top-down: height of one level (box, toggle and the curve to the next level); levels with an opening name get
+ *  NAME_H more. */
+const LEVEL_H = 56;
+/** Top-down: an opening name above a box may be at most this wide (it is shortened beyond). */
+const NAME_MAX_W = 130;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.5;
 
@@ -68,8 +70,8 @@ type Highlight = 'none' | 'due' | 'flags' | 'rare';
 interface LNode {
   id: string;
   col: number;
-  /** Place among the leaves (a leaf's index; a branch sits in the middle of its children). */
-  pos: number;
+  /** Place across the levels (x top-down, y left to right), from the compact layout (see `tidy`). */
+  b: number;
   /** Left edge of the box. */
   x: number;
   /** Centre of the box. */
@@ -168,7 +170,6 @@ export function TreeView() {
   const isOpen = (n: TreeNode) => n.children.length > 0 && (n.ply < depth - 1) !== toggled.has(n.id);
 
   const layout = useMemo(() => {
-    let leaf = 0;
     const nodes: LNode[] = [];
     const ghostsAt = (key: string, ply: number, prepared: string[]): LNode[] => {
       if (!showGaps || isMine(rep, key) || !prepared.length) return [];
@@ -184,7 +185,7 @@ export function TreeView() {
           const g: LNode = {
             id: `gap:${key}:${m.san}`,
             col: ply + 1,
-            pos: leaf++,
+            b: 0,
             x: 0,
             y: 0,
             w: boxWidth(label, formatPct(share)),
@@ -213,7 +214,7 @@ export function TreeView() {
       const ln: LNode = {
         id: n.id,
         col: n.ply + 1,
-        pos: 0,
+        b: 0,
         x: 0,
         y: 0,
         w: boxWidth(label, share !== undefined ? formatPct(share) : undefined),
@@ -230,7 +231,6 @@ export function TreeView() {
       if (!n.transposition && (ln.open || !n.children.length)) {
         ln.children.push(...ghostsAt(n.to, n.ply + 1, movesAt(rep, n.to).map((m) => m.san)));
       }
-      ln.pos = ln.children.length ? (ln.children[0].pos + ln.children.at(-1)!.pos) / 2 : leaf++;
       return ln;
     };
     const rootChildren = tree.map((n) => place(n, undefined));
@@ -238,7 +238,7 @@ export function TreeView() {
     const root: LNode = {
       id: 'root',
       col: 0,
-      pos: rootChildren.length ? (rootChildren[0].pos + rootChildren.at(-1)!.pos) / 2 : 0,
+      b: 0,
       x: 0,
       y: 0,
       w: 56,
@@ -248,13 +248,12 @@ export function TreeView() {
       children: rootChildren,
     };
     nodes.push(root);
-    const leaves = Math.max(leaf, 1);
-    const nameH = names ? NAME_H : 0;
     const maxCol = Math.max(...nodes.map((n) => n.col));
+    // A collapsed branch shows its number of moves next to its toggle.
+    const foldLabel = (n: LNode) => (n.node && n.node.children.length && !n.open ? textWidth(String(toMoves(n.node.size - 1)), SMALL_FONT) : 0);
 
     if (orientation === 'lr') {
-      // Columns (one per half-move) as wide as their widest label; leaves one row each.
-      const rowH = ROW_H + nameH;
+      // Columns (one per half-move) as wide as their widest label; the rows packed as tightly as the branches allow.
       const colW: number[] = [];
       for (const n of nodes) colW[n.col] = Math.max(colW[n.col] ?? 0, n.w);
       const colX: number[] = [];
@@ -263,25 +262,44 @@ export function TreeView() {
         colX[c] = x;
         x += (colW[c] ?? 40) + GUTTER;
       }
+      // A box with its name above it (the toggle and its count stay in the gutter).
+      tidy(root, (n) => ({ lo: -BOX_H / 2 - (n.name ? NAME_H : 0), hi: BOX_H / 2 }), { siblings: 8, cousins: 10 });
+      const top = Math.min(...nodes.map((n) => n.b - BOX_H / 2 - (n.name ? NAME_H : 0)));
       for (const n of nodes) {
         n.x = colX[n.col];
-        n.y = PAD + nameH + BOX_H / 2 + n.pos * rowH;
+        n.y = PAD + (n.b - top);
         if (n.name) n.name.shown = fitText(n.name.short, NAME_FONT, (colW[n.col] ?? 60) + GUTTER - 6);
       }
-      const maxX = Math.max(...nodes.map((n) => n.x + n.w));
-      return { nodes, root, width: maxX + PAD + 40, height: leaves * rowH + PAD * 2 };
+      const maxX = Math.max(...nodes.map((n) => n.x + n.w + (foldLabel(n) ? 23 + foldLabel(n) : 0)));
+      const maxY = Math.max(...nodes.map((n) => n.y + BOX_H / 2));
+      return { nodes, root, width: maxX + PAD + 20, height: maxY + PAD };
     }
 
-    // Top-down: one level per half-move; the leaves side by side, each as wide as the widest box.
-    const nameW = Math.min(120, Math.max(0, ...nodes.map((n) => (n.name ? textWidth(n.name.short, NAME_FONT) : 0))));
-    const slot = Math.max(64, nameW, ...nodes.map((n) => n.w)) + 14;
-    const levelH = LEVEL_H + nameH;
-    for (const n of nodes) {
-      n.x = PAD + n.pos * slot + (slot - n.w) / 2;
-      n.y = PAD + nameH + BOX_H / 2 + n.col * levelH;
-      if (n.name) n.name.shown = fitText(n.name.short, NAME_FONT, slot - 6);
+    // Top-down: one level per half-move; side by side, each box as close to its neighbours as the branches allow.
+    // Only levels with an opening name make room for it.
+    const named = new Set(nodes.filter((n) => n.name).map((n) => n.col));
+    const levelY: number[] = [];
+    for (let c = 0, y = PAD; c <= maxCol; c++) {
+      if (named.has(c)) y += NAME_H;
+      levelY[c] = y + BOX_H / 2;
+      y += LEVEL_H;
     }
-    return { nodes, root, width: PAD * 2 + leaves * slot, height: PAD * 2 + (maxCol + 1) * levelH };
+    const room = (n: LNode) => Math.max(n.w, n.name ? Math.min(NAME_MAX_W, textWidth(n.name.short, NAME_FONT)) : 0);
+    tidy(
+      root,
+      (n) => ({ lo: -room(n) / 2, hi: Math.max(room(n) / 2, foldLabel(n) ? 12 + foldLabel(n) + 2 : 0) }),
+      { siblings: 8, cousins: 14 },
+    );
+    const left = Math.min(...nodes.map((n) => n.b - room(n) / 2));
+    let right = 0;
+    for (const n of nodes) {
+      const cx = PAD + (n.b - left);
+      n.x = cx - n.w / 2;
+      n.y = levelY[n.col];
+      if (n.name) n.name.shown = fitText(n.name.short, NAME_FONT, room(n));
+      right = Math.max(right, cx + Math.max(room(n) / 2, foldLabel(n) ? 14 + foldLabel(n) : 0));
+    }
+    return { nodes, root, width: right + PAD, height: levelY[maxCol] + BOX_H / 2 + PAD };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tree, depth, toggled, showGaps, rep, profile, cacheTick, orientation, names, openings]);
 
@@ -700,6 +718,48 @@ export function TreeView() {
       {dialog && <ChoiceDialog {...dialog} onClose={() => setDialog(null)} />}
     </div>
   );
+}
+
+/**
+ * A compact ("tidy") tree layout: every branch is placed as close to its left neighbour as their outlines allow, level
+ * by level, so a narrow branch can sit right next to a wide one wherever they do not meet; a parent sits midway
+ * between its first and last child. `room` gives the space a node takes across the levels around its own place
+ * ([lo, hi]). Siblings keep `siblings` apart, nodes of different parents `cousins`. Sets `b` (the place across the
+ * levels) on every node.
+ */
+function tidy(root: LNode, room: (n: LNode) => { lo: number; hi: number }, gap: { siblings: number; cousins: number }) {
+  const rel = new Map<LNode, number>();
+  // Returns the outline of a branch per level below its root: leftmost and rightmost edge, relative to the root.
+  const outline = (n: LNode): { l: number[]; r: number[] } => {
+    const own = room(n);
+    if (!n.children.length) return { l: [own.lo], r: [own.hi] };
+    const subs = n.children.map(outline);
+    const offsets = [0];
+    const l = subs[0].l.slice();
+    const r = subs[0].r.slice();
+    for (let i = 1; i < subs.length; i++) {
+      const s = subs[i];
+      let shift = -Infinity;
+      for (let d = 0; d < Math.min(r.length, s.l.length); d++) shift = Math.max(shift, r[d] - s.l[d] + (d === 0 ? gap.siblings : gap.cousins));
+      offsets.push(shift);
+      for (let d = 0; d < s.l.length; d++) {
+        if (d < l.length) r[d] = s.r[d] + shift;
+        else {
+          l.push(s.l[d] + shift);
+          r.push(s.r[d] + shift);
+        }
+      }
+    }
+    const mid = (offsets[0] + offsets[offsets.length - 1]) / 2;
+    n.children.forEach((c, i) => rel.set(c, offsets[i] - mid));
+    return { l: [own.lo, ...l.map((v) => v - mid)], r: [own.hi, ...r.map((v) => v - mid)] };
+  };
+  outline(root);
+  const place = (n: LNode, b: number) => {
+    n.b = b;
+    for (const c of n.children) place(c, b + rel.get(c)!);
+  };
+  place(root, 0);
 }
 
 function Edges({ root, orientation }: { root: LNode; orientation: Orientation }) {
