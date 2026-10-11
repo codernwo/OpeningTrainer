@@ -71,3 +71,14 @@ export const tcLabel = (tc: TimeControl | undefined) => (hasClock(tc) ? `${tc.mi
 
 /** As in PGN headers and on Lichess: seconds + increment ("300+3"). */
 export const tcPgn = (tc: TimeControl) => `${tc.minutes * 60}+${tc.increment}`;
+
+/** The clock of a game resumed after you were away (page reloaded or closed, another page visited). As on Lichess,
+ *  your clock ran meanwhile; the opponent's did not (it would have replied at once). The time between coming back
+ *  and the game being ready (loading the opponent) costs nobody anything. Clocks that had not started yet (before
+ *  both sides moved) stay as they were. */
+export function resumedClock(c: ClockState, me: Side, savedAt: number, arrivedAt: number, now: number): ClockState {
+  if (!c.running) return c;
+  const opponent: Side = me === 'white' ? 'black' : 'white';
+  const away = Math.max(0, arrivedAt - savedAt);
+  return { ...c, [me]: timeLeft(c, me, savedAt) - away, [opponent]: timeLeft(c, opponent, savedAt), since: now };
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flagged, newClock, press, runFor, showTime, stop, tcLabel, timeLeft } from './clock';
+import { flagged, newClock, press, runFor, showTime, stop, tcLabel, timeLeft, resumedClock } from './clock';
 
 describe('chess clock', () => {
   it('starts with the first move, runs for the side to move, adds the increment after a move', () => {
@@ -33,5 +33,37 @@ describe('chess clock', () => {
     expect(showTime(3_600_000)).toBe('1:00:00');
     expect(tcLabel({ minutes: 0, increment: 5 })).toBe('No clock');
     expect(tcLabel({ minutes: 5, increment: 3 })).toBe('5+3');
+  });
+});
+
+describe('resuming a game after being away', () => {
+  const t0 = 1_000_000;
+  // 3+0; White (me) has 150 s, Black 170 s.
+  const base = { white: 150_000, black: 170_000, running: 'white' as const, since: t0 };
+
+  it('my clock ran while I was away', () => {
+    // Saved 10 s into my move, back 60 s later, ready 5 s after that (loading the opponent).
+    const c = resumedClock(base, 'white', t0 + 10_000, t0 + 70_000, t0 + 75_000);
+    expect(timeLeft(c, 'white', t0 + 75_000)).toBe(150_000 - 70_000);
+    expect(c.running).toBe('white');
+    expect(timeLeft(c, 'black', t0 + 75_000)).toBe(170_000);
+  });
+
+  it("the opponent's did not: away on its move costs me, not it", () => {
+    const theirs = { ...base, running: 'black' as const };
+    const c = resumedClock(theirs, 'white', t0 + 2_000, t0 + 62_000, t0 + 64_000);
+    expect(timeLeft(c, 'black', t0 + 64_000)).toBe(168_000);
+    expect(timeLeft(c, 'white', t0 + 64_000)).toBe(90_000);
+    expect(c.running).toBe('black');
+  });
+
+  it('long away: my flag has fallen', () => {
+    const c = resumedClock(base, 'white', t0, t0 + 3_600_000, t0 + 3_600_500);
+    expect(flagged(c, t0 + 3_600_500)).toBe('white');
+  });
+
+  it('clocks that had not started stay as they were', () => {
+    const idle = { white: 180_000, black: 180_000, running: null, since: 0 };
+    expect(resumedClock(idle, 'white', t0, t0 + 60_000, t0 + 61_000)).toEqual(idle);
   });
 });

@@ -10,7 +10,8 @@ export type Shape = DrawShape;
 /** Colours of the arrows the app draws itself. PGN annotations ([%cal]/[%csl] from Lichess, Chessable,
  *  ChessBase) only know green, red, blue and yellow, so the app never uses those: moves are white or black
  *  after the side that plays them and run under the pieces like a trail, so annotations stay on top; the
- *  engine's move is violet and a move you point at in the database is pink. */
+ *  engine's move is violet, a move you point at in the database is pink, and a gap (a reply you have not
+ *  prepared) is the orange-red of the app's gap badges, lighter than the annotations' dark red. */
 /** Thin dark edge that keeps white arrows and circles visible on the light squares. */
 const WHITE_EDGE = '#6b6252';
 
@@ -21,6 +22,9 @@ const APP_BRUSHES: Record<string, DrawBrush> = {
   moveBlackSoft: { key: 'mbs', color: '#000000', opacity: 0.3, lineWidth: 12 },
   engine: { key: 'eng', color: '#7a3db8', opacity: 0.6, lineWidth: 12 },
   pointer: { key: 'ptr', color: '#e0457b', opacity: 0.75, lineWidth: 10 },
+  // A gap: an opponent's move people often play that you have not prepared (the colour of the "gap" badges).
+  gap: { key: 'gap', color: '#d0502b', opacity: 0.8, lineWidth: 10 },
+  gapSoft: { key: 'gaps', color: '#d0502b', opacity: 0.45, lineWidth: 10 },
 };
 
 /** A move as an arrow in the colour of the side that plays it. `soft` when the position has annotations
@@ -35,6 +39,12 @@ export function moveArrow(uci: string, side: Side, opts: { soft?: boolean; width
     modifiers: { ...(opts.width ? { lineWidth: opts.width } : {}), ...(side === 'white' ? { hilite: WHITE_EDGE } : {}) },
     ...(opts.onTop ? {} : { below: true }),
   } as Shape;
+}
+
+/** A gap as a red-orange arrow under the pieces, thicker the more often it is played (`share` 0–1). */
+export function gapArrow(uci: string, share: number, opts: { soft?: boolean } = {}): Shape {
+  const [orig, dest] = uciToArrow(uci);
+  return { orig, dest, brush: opts.soft ? 'gapSoft' : 'gap', modifiers: { lineWidth: Math.round(6 + Math.min(1, share * 2) * 6) }, below: true } as Shape;
 }
 
 /** A circle around a square in the colour of a side (e.g. the piece to move, as a hint). */

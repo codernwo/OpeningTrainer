@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { moveFromBoard, moveNumber, playSan, turnOfKey, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
 import { lossLabel } from '../lib/audit';
+import { totalGames } from '../lib/lichess';
 import { useEvaluation, useExplorer, useKey } from '../lib/hooks';
 import {
   addLine,
@@ -26,10 +27,10 @@ import { State } from '../lib/srs';
 import { MOVE_NAGS, nagInfo, nagText, nagTitle, POSITION_NAGS, toggleNag } from '../lib/nags';
 import { shapesToTokens, tokensToShapes } from '../lib/shapes';
 import { activeProfile, activeRep, useApp } from '../lib/store';
-import { Board, moveArrow, type Shape } from './Board';
+import { Board, gapArrow, moveArrow, type Shape } from './Board';
 import { ChoiceDialog, type Choice } from './Dialog';
 import { EnginePanel, EvalBar } from './EnginePanel';
-import { ExplorerPanel } from './ExplorerPanel';
+import { ExplorerPanel, isGapMove } from './ExplorerPanel';
 import { Icon } from './Icon';
 import { CheckTourBar } from './CheckTour';
 import { loadOpenings, openingOfLine, useOpeningNames, useOpenings } from '../lib/openings';
@@ -131,6 +132,17 @@ export function BuildView() {
   const shapes = useMemo<Shape[]>(() => {
     const turn = turnOfKey(key);
     const s: Shape[] = repMoves.map((m) => moveArrow(m.uci, turn, { soft: annotated, width: mine ? 12 : 9 }));
+    // Gaps in red, as marked in the database table: the replies people play here that you have not prepared.
+    const data = tab !== 'engine' ? explorer.data : null;
+    if (data && data.moves.length) {
+      const total = totalGames(data);
+      const ctx = { oppToMove: turn !== rep.side, repMoves, gapShare: GAP_SHARE };
+      for (const m of data.moves) {
+        if (!isGapMove(m, total, ctx)) continue;
+        const uci = playSan(key, m.san)?.uci ?? m.uci;
+        s.push(gapArrow(uci, totalGames(m) / total, { soft: annotated }));
+      }
+    }
     if (tab === 'engine' && engineOn && evaluation?.lines[0]?.uci[0]) {
       const [orig, dest] = uciToArrow(evaluation.lines[0].uci[0]);
       s.push({ orig, dest, brush: 'engine' } as Shape);
@@ -142,7 +154,7 @@ export function BuildView() {
       s.push({ orig, dest, brush: 'pointer' } as Shape);
     }
     return s;
-  }, [repMoves, mine, annotated, hover, tab, engineOn, evaluation, explorer.data, key]);
+  }, [repMoves, mine, annotated, hover, tab, engineOn, evaluation, explorer.data, key, rep.side]);
 
   const onBoardMove = (orig: string, dest: string) => {
     const m = moveFromBoard(key, orig, dest);
@@ -410,6 +422,10 @@ export function BuildView() {
           <br />
           Draw on the board like on Lichess: right-click and drag for an arrow, right-click a square for a circle (with{' '}
           <span className="kbd">Shift</span> red, <span className="kbd">Alt</span> blue). They are saved with the position.
+          <br />
+          The app's own arrows: your prepared moves in white or black, and <span className="gap-key" /> gaps in orange-red —
+          replies played in {Math.round(GAP_SHARE * 100)}% or more of the database games that you have not prepared (thicker
+          = played more often).
         </div>
       </div>
 

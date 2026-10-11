@@ -17,10 +17,15 @@ export interface Profile {
   /** Lichess rating groups of the opponents this player meets. */
   ratings: number[];
   speeds: string[];
-  /** The player's own approximate rating (used for the human-like opponent). */
+  /** The player's own approximate rating, typed in (used for the analysis and the human-like opponent). */
   rating?: number;
-  /** Lichess username, to fetch the player's own games. */
+  /** Lichess username, to fetch the player's own games (and rating). */
   lichess?: string;
+  /** The player's Lichess rating, fetched with their username (rapid; see lichessRating.ts). Used as their own rating
+   *  unless `ratingManual`. */
+  lichessRating?: { user: string; rating: number; speed: string; games: number; provisional: boolean; at: number };
+  /** The own rating is typed in by hand even though there is a Lichess username. */
+  ratingManual?: boolean;
   /** Names the player uses in PGN files of their games (other sites, over-the-board), to tell their colour. */
   aliases?: string[];
   /** The order of the player's repertoires on the Overview (ids); others follow in the order they were made. */
@@ -455,8 +460,16 @@ export function unsavedCount(s: Pick<AppState, 'line' | 'ply'>, rep: Repertoire 
   return s.line.slice(0, s.ply).filter((m) => !findMove(rep, m.from, m.uci)).length;
 }
 
-/** The player's own rating: explicit, or the middle of the rating groups they face. */
+/** The player's Lichess rating when it is used as their own rating (a username, and not typed in by hand). */
+export function lichessRatingOf(p: Profile): Profile['lichessRating'] | null {
+  const lr = p.lichessRating;
+  return lr && !p.ratingManual && p.lichess && lr.user.toLowerCase() === p.lichess.toLowerCase() ? lr : null;
+}
+
+/** The player's own rating: from Lichess, typed in, or the middle of the rating groups they face. */
 export function profileRating(p: Profile): number {
+  const lr = lichessRatingOf(p);
+  if (lr) return lr.rating;
   if (p.rating) return p.rating;
   if (!p.ratings.length) return 1500;
   const sorted = [...p.ratings].sort((a, b) => a - b);

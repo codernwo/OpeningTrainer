@@ -31,6 +31,13 @@ interface Props {
   onHover: (uci: string | null) => void;
 }
 
+/** Whether a database move is a gap: the opponent's move, played in at least `gapShare` of the games, where you have
+ *  prepared other replies but not this one. (The same rule for the explorer's "gap" badge and Build's red arrows.) */
+export function isGapMove(m: ExplorerMove, total: number, ctx: { oppToMove: boolean; repMoves: RepMove[]; gapShare: number }): boolean {
+  const share = total ? totalGames(m) / total : 0;
+  return ctx.oppToMove && ctx.repMoves.length > 0 && !ctx.repMoves.some((r) => r.san === m.san) && share >= ctx.gapShare;
+}
+
 export function ExplorerPanel({ positionKey, result, db, profile, repSide, repMoves, gapShare, onPlay, onAdd, onHover }: Props) {
   const updateProfile = useApp((s) => s.updateProfile);
   const setView = useApp((s) => s.setView);
@@ -133,7 +140,7 @@ export function ExplorerPanel({ positionKey, result, db, profile, repSide, repMo
             {data.moves.map((m) => {
               const share = total ? totalGames(m) / total : 0;
               const inRep = repMoves.some((r) => r.san === m.san);
-              const isGap = oppToMove && !inRep && repMoves.length > 0 && share >= gapShare;
+              const isGap = isGapMove(m, total, { oppToMove, repMoves, gapShare });
               return (
                 <tr
                   key={m.uci}

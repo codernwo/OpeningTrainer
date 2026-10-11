@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatLine, keyToFen, moveFromBoard, posFromFen, START_KEY, turnOfKey, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
-import { flagged, hasClock, newClock, press, runFor, showTime, stop, tcLabel, tcPgn, timeLeft, type ClockState, type TimeControl } from '../lib/clock';
+import { flagged, hasClock, newClock, press, resumedClock, runFor, showTime, stop, tcLabel, tcPgn, timeLeft, type ClockState, type TimeControl } from '../lib/clock';
 import { gameId, speedFromTimeControl, type GameResult, type PlayedGame } from '../lib/games';
 import { flushGames, holdForGame, useGames, useRatings } from '../lib/gamesStore';
-import { CATEGORY_NAMES, categoryOf, RATING_CATEGORIES, showRating, stakes, type CategoryRating, type Ratings } from '../lib/rating';
+import { CATEGORY_NAMES, categoryOf, RATING_CATEGORIES, showRating, stakes, type CategoryRating, type RatingCategory, type Ratings } from '../lib/rating';
 import { useAnalysisQueue } from '../lib/analyzer';
 import { playMoveSound, playSound } from '../lib/sound';
 import { capturedBy, materialBalance, type Captured } from '../lib/material';
@@ -19,6 +19,7 @@ import { GameReview } from './GameReview';
 import { GameRow } from './GamesView';
 import { OpeningLabel } from './OpeningLabel';
 import { Icon } from './Icon';
+import { RatingChart } from './RatingChart';
 import { RatingDiff } from './RatingDiff';
 
 interface GameConfig {
@@ -48,19 +49,142 @@ function readPrefs(): Partial<{ level: number; mode: OpponentSettings['mode']; c
   }
 }
 
+// ---------------------------------------------------------------------------
+// A rated game in progress is kept on this device, so it can go on after a reload, a closed page or a visit to
+// another page. Your clock keeps running meanwhile, as on Lichess.
+
+interface SavedGame {
+  profileId: string;
+  startedAt: number;
+  config: GameConfig;
+  moves: PlayedMove[];
+  sources: Source[];
+  moveClocks: (number | null)[];
+  clock: ClockState | null;
+  /** When it was written: the last move, or when you left. */
+  savedAt: number;
+}
+type Resume = SavedGame & { arrivedAt: number };
+
+const CURRENT_KEY = 'play-current';
+
+function readCurrent(profileId: string | null): Resume | null {
+  try {
+    const g = JSON.parse(localStorage.getItem(CURRENT_KEY) ?? 'null') as SavedGame | null;
+    return g && g.profileId === profileId && g.config?.rated && Array.isArray(g.moves) ? { ...g, arrivedAt: Date.now() } : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCurrent(g: SavedGame) {
+  try {
+    localStorage.setItem(CURRENT_KEY, JSON.stringify(g));
+  } catch {
+    /* storage unavailable: then leaving is a loss, as before */
+  }
+}
+
+function clearCurrent(startedAt: number) {
+  try {
+    const g = JSON.parse(localStorage.getItem(CURRENT_KEY) ?? 'null') as SavedGame | null;
+    if (g?.startedAt === startedAt) localStorage.removeItem(CURRENT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function PlayView() {
-  const [game, setGame] = useState<GameConfig | null>(null);
+  const profileId = useApp((s) => s.data.activeProfileId);
+  const [session, setSession] = useState<{ config: GameConfig; resume?: Resume } | null>(() => {
+    const cur = readCurrent(profileId);
+    return cur ? { config: cur.config, resume: cur } : null;
+  });
   const [round, setRound] = useState(0);
   // A practice game opened from the history: its review, with the analysis.
   const openId = useApp((s) => s.openGameId);
   const review = useGames((s) => (openId ? s.data.games.find((g) => g.id === openId && g.source === 'practice') : undefined));
-  // Opening a game's review ends the game on the board (it is saved); coming back shows the setup and the history.
+  // Opening a game's review ends the game on the board (it is saved); coming back shows the setup and the history,
+  // or the rated game still in progress.
   useEffect(() => {
-    if (review) setGame(null);
+    if (review) setSession(null);
+    else {
+      const cur = readCurrent(profileId);
+      if (cur) setSession((s) => s ?? { config: cur.config, resume: cur });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [review]);
   if (review) return <GameReview key={review.id} game={review} />;
-  if (game) return <GameSession key={round} config={game} onNew={() => setGame(null)} onRematch={() => setRound((r) => r + 1)} />;
-  return <PlaySetup onStart={setGame} />;
+  if (session) {
+    const game = (
+      <GameSession
+        key={round}
+        config={session.config}
+        resume={session.resume}
+        onNew={() => setSession(null)}
+        onRematch={() => {
+          setSession({ config: session.config });
+          setRound((r) => r + 1);
+        }}
+      />
+    );
+    return session.resume ? (
+      <WhenMaiaReady
+        onGiveUp={() => {
+          // The game is already in your history as lost.
+          clearCurrent(session.resume!.startedAt);
+          setSession(null);
+        }}
+      >
+        {game}
+      </WhenMaiaReady>
+    ) : (
+      game
+    );
+  }
+  return <PlaySetup onStart={(config) => setSession({ config })} />;
+}
+
+/** A resumed game waits until the opponent is loaded again (after a reload); that time costs nobody anything. */
+function WhenMaiaReady({ children, onGiveUp }: { children: React.ReactNode; onGiveUp: () => void }) {
+  const [ready, setReady] = useState(() => useMaia.getState().status === 'ready');
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (ready) return;
+    let alive = true;
+    setError(null);
+    engine.terminate();
+    loadMaia().then(
+      () => alive && setReady(true),
+      (e) => alive && setError((e as Error).message),
+    );
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt]);
+  if (ready) return <>{children}</>;
+  return (
+    <div style={{ maxWidth: 560, margin: '40px auto' }} className="card card-pad stack">
+      <h2>Your rated game</h2>
+      {error ? (
+        <>
+          <div className="notice error small">{error}</div>
+          <div className="row wrap">
+            <button className="btn primary" onClick={() => setAttempt((a) => a + 1)}>
+              Try again
+            </button>
+            <button className="btn ghost" onClick={onGiveUp}>
+              Give up (counts as a loss)
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="muted">Resuming… (loading the opponent; the clocks wait)</div>
+      )}
+    </div>
+  );
 }
 
 const TC_PRESETS: TimeControl[] = [
@@ -167,25 +291,42 @@ function PlayHistory({ ratings }: { ratings: Ratings }) {
   );
 }
 
-/** Your rating against Maia per tempo, once you have played rated games. */
-function RatingCard({ ratings }: { ratings: Ratings }) {
-  if (!RATING_CATEGORIES.some((c) => ratings.byCategory[c].games)) return null;
+/** Your rating against Maia per tempo, once you have played rated games; pick a tempo for its graph. */
+function RatingCard({ ratings, preferred }: { ratings: Ratings; preferred: RatingCategory | null }) {
+  const profileId = useApp((s) => s.data.activeProfileId);
+  const all = useGames((s) => s.data.games);
+  const games = useMemo(() => all.filter((g) => g.profileId === profileId && g.source === 'practice'), [all, profileId]);
+  const played = RATING_CATEGORIES.filter((c) => ratings.byCategory[c].games);
+  // The tempo chosen in the setup when it has games, else the one played last.
+  const latest = played.slice().sort((a, b) => (ratings.byCategory[b].lastPlayed ?? 0) - (ratings.byCategory[a].lastPlayed ?? 0))[0];
+  const [picked, setPicked] = useState<RatingCategory | null>(null);
+  const shown = picked && ratings.byCategory[picked].games ? picked : preferred && ratings.byCategory[preferred].games ? preferred : latest;
+  if (!played.length) return null;
   return (
     <div className="card card-pad stack">
       <h3>Your rating against Maia</h3>
-      <div className="rating-tiles">
+      <div className="rating-tiles" role="tablist">
         {RATING_CATEGORIES.map((c) => {
           const r = ratings.byCategory[c];
           return (
-            <div key={c} className={`stat ${r.games ? '' : 'faint'}`}>
+            <button
+              key={c}
+              role="tab"
+              aria-selected={c === shown}
+              className={`stat rating-tile ${r.games ? '' : 'faint'} ${c === shown ? 'on' : ''}`}
+              disabled={!r.games}
+              onClick={() => setPicked(c)}
+              title={r.games ? `Show the ${CATEGORY_NAMES[c].toLowerCase()} graph` : undefined}
+            >
               <b>{showRating(r)}</b>
               <span>
                 {CATEGORY_NAMES[c]} · {r.games} {r.games === 1 ? 'game' : 'games'}
               </span>
-            </div>
+            </button>
           );
         })}
       </div>
+      {shown && <RatingChart ratings={ratings} category={shown} games={games} />}
       <div className="help">
         Glicko-2, as on Lichess, one rating per tempo; everyone starts at 400. A “?” means provisional: not enough games
         yet to be sure, so the rating still moves in big steps. Maia here plays like a person (it does not always play its
@@ -229,8 +370,8 @@ function RatedSetting(props: {
           <div className="help">
             Against Maia {level}: win <span className="rating-diff up">{signed(s.win)}</span> · draw{' '}
             <span className={`rating-diff ${s.draw > 0 ? 'up' : s.draw < 0 ? 'down' : ''}`}>{signed(s.draw)}</span> · loss{' '}
-            <span className="rating-diff down">{signed(s.loss)}</span>. No take-backs and no repertoire hints; leaving the
-            game counts as a loss.
+            <span className="rating-diff down">{signed(s.loss)}</span>. No take-backs and no repertoire hints. If you leave
+            during the game, it waits for you here, but your clock keeps running.
           </div>
           {fair !== level && (
             <div className="help row wrap" style={{ gap: 6 }}>
@@ -431,7 +572,7 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
           {downloaded === false && <span className="small muted">One-time download, then it works offline too.</span>}
         </div>
       </div>
-      <RatingCard ratings={ratings} />
+      <RatingCard ratings={ratings} preferred={category} />
       <PlayHistory ratings={ratings} />
       <div className="help">
         Opponent: Maia-3 by the CSSLab (University of Toronto) — a network trained on millions of human games that predicts
@@ -499,12 +640,12 @@ function CapturedPieces({ pieces, color, plus }: { pieces: Captured[]; color: Si
   );
 }
 
-function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: () => void; onRematch: () => void }) {
+function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig; resume?: Resume; onNew: () => void; onRematch: () => void }) {
   const rep = useApp(activeRep);
   const profile = useApp(activeProfile)!;
   const { openLine, showToast, openGame } = useApp.getState();
-  const [moves, setMoves] = useState<PlayedMove[]>(config.start);
-  const [sources, setSources] = useState<Source[]>(config.start.map(() => 'start'));
+  const [moves, setMoves] = useState<PlayedMove[]>(resume?.moves ?? config.start);
+  const [sources, setSources] = useState<Source[]>(resume?.sources ?? config.start.map(() => 'start'));
   const [result, setResult] = useState<Result | null>(null);
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -522,22 +663,29 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
   // The clock (none when the time is unlimited), and the time left after each move, for the game record.
   const tc = config.tc;
   const timed = hasClock(tc);
-  const [clock, setClock] = useState<ClockState | null>(() => (timed ? newClock(tc) : null));
+  const [clock, setClock] = useState<ClockState | null>(() =>
+    resume?.clock ? resumedClock(resume.clock, config.color, resume.savedAt, resume.arrivedAt, Date.now()) : timed ? newClock(tc) : null,
+  );
   const clockRef = useRef(clock);
   clockRef.current = clock;
-  const [moveClocks, setMoveClocks] = useState<(number | null)[]>(() => config.start.map(() => null));
+  const [moveClocks, setMoveClocks] = useState<(number | null)[]>(() => resume?.moveClocks ?? config.start.map(() => null));
   const [, setTick] = useState(0);
-  const lowWarned = useRef(false);
+  const lowWarned = useRef(!!clock && clock[config.color] < LOW_TIME);
 
   // The game is kept in your history: when it ends, and when you leave it unfinished.
-  const startedAt = useRef(Date.now()).current;
+  const startedAt = useRef(resume?.startedAt ?? Date.now()).current;
   const id = gameId(profile.id, `practice:${startedAt}`);
-  const record = useRef({ moves, result, moveClocks });
-  record.current = { moves, result, moveClocks };
-  // Rated: your rating in this tempo when the game began (shown during the game), and what the game did to it.
+  const record = useRef({ moves, result, moveClocks, sources });
+  record.current = { moves, result, moveClocks, sources };
+  // Rated: your rating in this tempo when the game began (shown during the game), and what the game did to it. A
+  // resumed game is already in your history (as lost until it ends): then the rating before it.
   const ratings = useRatings(profile.id);
   const category = config.rated ? categoryOf(tc) : null;
-  const ratingAtStart = useRef(category ? ratings.byCategory[category] : null).current;
+  const ratingAtStart = useRef(
+    category
+      ? ((step) => (step ? { rating: step.before, provisional: step.provisionalBefore } : ratings.byCategory[category]))(ratings.byGame.get(id))
+      : null,
+  ).current;
   const ratingStep = config.rated ? ratings.byGame.get(id) : undefined;
   const save = () => {
     const { moves: ms, moveClocks: cs } = record.current;
@@ -581,16 +729,31 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
   useEffect(() => () => {
-    if (!record.current.result) save();
+    if (!record.current.result) {
+      save();
+      persist();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // A rated game is kept from your first move on, as lost until it ends: closing or reloading the page cannot undo a
-  // loss. When the page is hidden or closed, the moves so far are written too.
+  // loss. And it is kept on this device as it stands, so you can come back to it (your clock runs meanwhile).
   const myMoves = moves.slice(config.start.length).filter((m) => turnOfKey(m.from) === config.color).length;
   const ratedOn = config.rated && myMoves > 0 && !result;
+  const persist = () => {
+    if (!config.rated) return;
+    const { moves: ms, result: r, moveClocks: cs, sources: ss } = record.current;
+    if (r) return clearCurrent(startedAt);
+    if (!ms.slice(config.start.length).some((m) => turnOfKey(m.from) === config.color)) return;
+    writeCurrent({ profileId: profile.id, startedAt, config, moves: ms, sources: ss, moveClocks: cs, clock: clockRef.current, savedAt: Date.now() });
+  };
+  useEffect(() => {
+    persist();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moves, result]);
   const keep = () => {
     save();
+    persist();
     void flushGames(); // written at once, not after the usual short delay
   };
   useEffect(() => {
@@ -625,6 +788,22 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
     playSound('GenericNotify');
     // The board in full view from the first move on (on a phone the setup may have been scrolled down).
     window.scrollTo({ top: 0 });
+    if (resume) {
+      const away = Math.max(0, resume.arrivedAt - resume.savedAt);
+      const c = clockRef.current;
+      // Out of time while away, on the opponent's move (on your own move the clock below notices).
+      if (c && c.running && c.running !== config.color && c[config.color] <= 0) finish(timeout(moves.at(-1)?.to ?? START_KEY, config.color));
+      else
+        setNotice({
+          text: (
+            <>
+              Game resumed.
+              {c?.running && away >= 1000 ? ` Your clock ran while you were away (${showTime(away)}).` : ''}
+            </>
+          ),
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const key = moves.at(-1)?.to ?? START_KEY;
@@ -645,7 +824,7 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
 
   /** A move by either side: on the board, with its sound, and on the clock. As on Lichess, the clock starts once both
    *  sides have made their first move. */
-  const sessionMoves = useRef(0);
+  const sessionMoves = useRef(resume ? resume.moves.length - config.start.length : 0);
   const play = (m: PlayedMove, source: Source) => {
     const mover = turnOfKey(m.from);
     setMoves((ms) => [...ms, m]);
@@ -828,7 +1007,9 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
             </div>
           )}
           {config.rated && !result && (
-            <div className="small muted">Rated game: no take-backs; leaving the game counts as a loss.</div>
+            <div className="small muted">
+              Rated game: no take-backs. If you leave, the game waits for you here, but your clock keeps running.
+            </div>
           )}
           {notice && (
             <div className="notice small row wrap">

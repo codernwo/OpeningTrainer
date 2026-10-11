@@ -114,8 +114,18 @@ export interface CategoryRating extends Glicko {
 
 export interface Ratings {
   byCategory: Record<RatingCategory, CategoryRating>;
-  /** Per rated game: the rating before and after it. */
-  byGame: Map<string, { category: RatingCategory; before: number; after: number; provisional: boolean }>;
+  /** Per rated game: the rating before and after it (and its uncertainty after it), in the order played. */
+  byGame: Map<string, RatingStep>;
+}
+
+export interface RatingStep {
+  category: RatingCategory;
+  before: number;
+  after: number;
+  rd: number;
+  provisionalBefore: boolean;
+  provisional: boolean;
+  playedAt: number;
 }
 
 const fresh = (): CategoryRating => ({ ...START, games: 0, provisional: true, lastPlayed: null });
@@ -140,7 +150,15 @@ export function ratingsFrom(games: readonly PlayedGame[]): Ratings {
     const days = cur.lastPlayed ? (g.playedAt - cur.lastPlayed) / DAY : 0;
     const next = glickoUpdate(cur, bot, score, { white: g.myColor === 'white', days });
     byCategory[category] = { ...next, games: cur.games + 1, provisional: next.rd >= PROVISIONAL_RD, lastPlayed: g.playedAt };
-    byGame.set(g.id, { category, before: cur.rating, after: next.rating, provisional: next.rd >= PROVISIONAL_RD });
+    byGame.set(g.id, {
+      category,
+      before: cur.rating,
+      after: next.rating,
+      rd: next.rd,
+      provisionalBefore: cur.provisional,
+      provisional: next.rd >= PROVISIONAL_RD,
+      playedAt: g.playedAt,
+    });
   }
   return { byCategory, byGame };
 }

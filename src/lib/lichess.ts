@@ -323,3 +323,33 @@ export function fetchCloudEval(fen: string, multiPv = 3): Promise<CloudEval | nu
     }),
   );
 }
+
+// ---------------------------------------------------------------------------
+// A player's own rating (public, no login needed)
+
+export interface LichessRating {
+  rating: number;
+  speed: string;
+  games: number;
+  provisional: boolean;
+}
+
+type Perfs = Record<string, { games?: number; rating?: number; prov?: boolean } | undefined>;
+
+/** Rapid when the player has rapid games; otherwise the time control (blitz, classical, bullet) they play most. */
+export function pickRating(perfs: Perfs): LichessRating | null {
+  const ok = (s: string) => {
+    const p = perfs[s];
+    return p?.games && p.rating ? { rating: Math.round(p.rating), speed: s, games: p.games, provisional: !!p.prov } : null;
+  };
+  return ok('rapid') ?? (['blitz', 'classical', 'bullet'].map(ok).filter((x) => !!x).sort((a, b) => b!.games - a!.games)[0] || null);
+}
+
+/** The Lichess rating of `username` (null when the account does not exist or has no rated games). */
+export async function fetchLichessRating(username: string): Promise<LichessRating | null> {
+  const res = await fetch(`${LICHESS}/api/user/${encodeURIComponent(username)}`, { headers: { Accept: 'application/json' } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Lichess answered ${res.status}`);
+  const json = (await res.json()) as { perfs?: Perfs; disabled?: boolean };
+  return json.disabled ? null : pickRating(json.perfs ?? {});
+}

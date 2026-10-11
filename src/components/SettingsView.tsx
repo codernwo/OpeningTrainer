@@ -9,7 +9,9 @@ import { playSound, setSoundSet, SOUND_SET_NAMES, SOUND_SETS, soundSet, type Sou
 import { useOpeningNames } from '../lib/openings';
 import { connectDrive, disconnectDrive, driveBackups, loadDriveBackup, reconnectDrive, syncNow, useSync } from '../lib/sync';
 import { useGames } from '../lib/gamesStore';
-import { activeRep, exportBackup, parseBackup, PROFILE_COLORS, profileRating, useApp, type AppData, type Profile } from '../lib/store';
+import { activeRep, exportBackup, lichessRatingOf, parseBackup, PROFILE_COLORS, profileRating, useApp, type AppData, type Profile } from '../lib/store';
+import { refreshLichessRating, useLichessRatingState } from '../lib/lichessRating';
+import { formatDate } from '../lib/games';
 import { ChoiceDialog, type Choice } from './Dialog';
 import { Icon } from './Icon';
 import { ImportPgnDialog } from './ImportPgnDialog';
@@ -519,6 +521,76 @@ function MaiaCard() {
   );
 }
 
+/** The player's own rating, for the analysis and the opponent's starting level: from Lichess (rapid) when there is a
+ *  username, or typed in. */
+function OwnRating({ profile, onChange }: { profile: Profile; onChange: (patch: Partial<Profile>) => void }) {
+  const state = useLichessRatingState((s) => s[profile.id]);
+  const fromLichess = !!profile.lichess && !profile.ratingManual;
+  const lr = lichessRatingOf(profile);
+  const speed = lr ? (SPEED_LABELS as Record<string, string>)[lr.speed]?.toLowerCase() ?? lr.speed : '';
+  return (
+    <div className="field">
+      <label className="small">Own rating (used by the analysis and as the opponent's level in Play)</label>
+      {profile.lichess && (
+        <label className="row small" style={{ cursor: 'pointer', fontWeight: 400 }}>
+          <input
+            type="checkbox"
+            checked={fromLichess}
+            onChange={(e) => {
+              onChange({ ratingManual: e.target.checked ? undefined : true });
+              if (e.target.checked) void refreshLichessRating(profile.id, true);
+            }}
+          />
+          From Lichess ({profile.lichess}), rapid
+        </label>
+      )}
+      {fromLichess ? (
+        <div className="row wrap small" style={{ gap: 8 }}>
+          {lr ? (
+            <>
+              <b className="num" style={{ fontSize: 16 }}>
+                {lr.rating}
+                {lr.provisional ? '?' : ''}
+              </b>
+              <span className="muted">
+                Lichess {speed}
+                {lr.speed !== 'rapid' ? ' (no rapid games)' : ''} · {lr.games} {lr.games === 1 ? 'game' : 'games'} · updated {formatDate(lr.at)}
+              </span>
+            </>
+          ) : (
+            <span className="muted">
+              {state === 'loading'
+                ? 'Fetching from Lichess…'
+                : state === 'none'
+                  ? `No rated games found for ${profile.lichess} on Lichess; using ${profileRating(profile)}.`
+                  : state === 'error'
+                    ? `Lichess could not be reached; using ${profileRating(profile)} for now.`
+                    : `Using ${profileRating(profile)} until the Lichess rating is in.`}
+            </span>
+          )}
+          <button className="btn sm ghost" disabled={state === 'loading'} onClick={() => void refreshLichessRating(profile.id, true)}>
+            <Icon name="refresh" size={13} /> Refresh
+          </button>
+        </div>
+      ) : (
+        <input
+          className="input"
+          type="number"
+          min={400}
+          max={3000}
+          step={50}
+          style={{ width: 120 }}
+          defaultValue={profileRating(profile)}
+          onBlur={(e) => {
+            const v = Number(e.target.value);
+            if (v >= 400 && v <= 3000) onChange({ rating: v });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 function ProfileEditor({
   profile,
   repCount,
@@ -565,25 +637,10 @@ function ProfileEditor({
           </button>
         )}
       </div>
-      <div className="field">
-        <label className="small">Own rating (approximate)</label>
-        <input
-          className="input"
-          type="number"
-          min={400}
-          max={3000}
-          step={50}
-          style={{ width: 120 }}
-          defaultValue={profileRating(profile)}
-          onBlur={(e) => {
-            const v = Number(e.target.value);
-            if (v >= 400 && v <= 3000) onChange({ rating: v });
-          }}
-        />
-      </div>
+      <OwnRating profile={profile} onChange={onChange} />
       <div className="row wrap" style={{ gap: 16, alignItems: 'flex-start' }}>
         <div className="field">
-          <label className="small">Lichess username (to fetch your games)</label>
+          <label className="small">Lichess username (to fetch your games and rating)</label>
           <input
             className="input"
             style={{ width: 200 }}
