@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatLine, keyToFen, moveFromBoard, posFromFen, START_KEY, turnOfKey, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
 import { flagged, hasClock, newClock, press, runFor, showTime, stop, tcLabel, tcPgn, timeLeft, type ClockState, type TimeControl } from '../lib/clock';
 import { gameId, speedFromTimeControl, type GameResult, type PlayedGame } from '../lib/games';
-import { holdForGame, useGames } from '../lib/gamesStore';
+import { flushGames, holdForGame, useGames, useRatings } from '../lib/gamesStore';
+import { CATEGORY_NAMES, categoryOf, RATING_CATEGORIES, showRating, stakes, type CategoryRating, type Ratings } from '../lib/rating';
 import { useAnalysisQueue } from '../lib/analyzer';
 import { playMoveSound, playSound } from '../lib/sound';
 import { capturedBy, materialBalance, type Captured } from '../lib/material';
@@ -18,6 +19,7 @@ import { GameReview } from './GameReview';
 import { GameRow } from './GamesView';
 import { OpeningLabel } from './OpeningLabel';
 import { Icon } from './Icon';
+import { RatingDiff } from './RatingDiff';
 
 interface GameConfig {
   start: PlayedMove[];
@@ -25,6 +27,8 @@ interface GameConfig {
   settings: OpponentSettings;
   coach: boolean;
   tc: TimeControl;
+  /** Counts for your rating (only with a clock, from the starting position). */
+  rated: boolean;
 }
 
 export function levelName(level: number): string {
@@ -36,7 +40,7 @@ export function levelName(level: number): string {
   return 'master';
 }
 
-function readPrefs(): Partial<{ level: number; mode: OpponentSettings['mode']; coach: boolean; tc: TimeControl }> {
+function readPrefs(): Partial<{ level: number; mode: OpponentSettings['mode']; coach: boolean; tc: TimeControl; rated: boolean }> {
   try {
     return JSON.parse(localStorage.getItem('play-prefs') ?? '{}');
   } catch {
@@ -114,7 +118,7 @@ function TimeSetting({ tc, onChange }: { tc: TimeControl; onChange: (tc: TimeCon
 }
 
 /** Your practice games, newest first: open one for its analysis and to make training cards of your mistakes. */
-function PlayHistory() {
+function PlayHistory({ ratings }: { ratings: Ratings }) {
   const profileId = useApp((s) => s.data.activeProfileId);
   const all = useGames((s) => s.data.games);
   const current = useAnalysisQueue((s) => s.current);
@@ -149,7 +153,7 @@ function PlayHistory() {
       </div>
       <div className="game-list">
         {shown.map((g) => (
-          <GameRow key={g.id} game={g} analysing={current === g.id} />
+          <GameRow key={g.id} game={g} analysing={current === g.id} rating={ratings.byGame.get(g.id)} />
         ))}
       </div>
       {games.length > shown.length && (
@@ -158,6 +162,87 @@ function PlayHistory() {
             Show all {games.length}
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Your rating against Maia per tempo, once you have played rated games. */
+function RatingCard({ ratings }: { ratings: Ratings }) {
+  if (!RATING_CATEGORIES.some((c) => ratings.byCategory[c].games)) return null;
+  return (
+    <div className="card card-pad stack">
+      <h3>Your rating against Maia</h3>
+      <div className="rating-tiles">
+        {RATING_CATEGORIES.map((c) => {
+          const r = ratings.byCategory[c];
+          return (
+            <div key={c} className={`stat ${r.games ? '' : 'faint'}`}>
+              <b>{showRating(r)}</b>
+              <span>
+                {CATEGORY_NAMES[c]} · {r.games} {r.games === 1 ? 'game' : 'games'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="help">
+        Glicko-2, as on Lichess, one rating per tempo; everyone starts at 400. A “?” means provisional: not enough games
+        yet to be sure, so the rating still moves in big steps. Maia here plays like a person (it does not always play its
+        favourite move), so this is a rating on its own scale, close to Lichess but not the same.
+      </div>
+    </div>
+  );
+}
+
+/** Rated or casual: what you can win or lose against this opponent, and a fair opponent for your rating. */
+function RatedSetting(props: {
+  rated: boolean;
+  canRate: boolean;
+  reason: string;
+  current: CategoryRating;
+  category: string;
+  level: number;
+  white: boolean;
+  fair: number;
+  onRated: (r: boolean) => void;
+  onLevel: (l: number) => void;
+}) {
+  const { rated, canRate, current, level, fair } = props;
+  const s = stakes(current, level, props.white);
+  const signed = (d: number) => (d > 0 ? `+${d}` : d < 0 ? `−${-d}` : '±0');
+  return (
+    <div className="field">
+      <label className={`row ${canRate ? '' : 'disabled'}`} style={{ cursor: canRate ? 'pointer' : 'default' }}>
+        <input type="checkbox" checked={rated && canRate} disabled={!canRate} onChange={(e) => props.onRated(e.target.checked)} />
+        <b>Rated</b>
+        {canRate && (
+          <span className="muted">
+            · your {props.category} rating <b className="num">{showRating(current)}</b>
+          </span>
+        )}
+      </label>
+      {!canRate ? (
+        <div className="help">{props.reason}</div>
+      ) : rated ? (
+        <>
+          <div className="help">
+            Against Maia {level}: win <span className="rating-diff up">{signed(s.win)}</span> · draw{' '}
+            <span className={`rating-diff ${s.draw > 0 ? 'up' : s.draw < 0 ? 'down' : ''}`}>{signed(s.draw)}</span> · loss{' '}
+            <span className="rating-diff down">{signed(s.loss)}</span>. No take-backs and no repertoire hints; leaving the
+            game counts as a loss.
+          </div>
+          {fair !== level && (
+            <div className="help row wrap" style={{ gap: 6 }}>
+              A fair opponent for you now:
+              <button className="btn sm" onClick={() => props.onLevel(fair)}>
+                Maia {fair}
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="help">Casual: take-backs and hints allowed; your rating stays as it is.</div>
       )}
     </div>
   );
@@ -178,6 +263,14 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
   const [mode, setMode] = useState<OpponentSettings['mode']>(prefs.mode ?? 'realistic');
   const [coach, setCoach] = useState(prefs.coach ?? true);
   const [tc, setTc] = useState<TimeControl>(prefs.tc ?? { minutes: 0, increment: 0 });
+  const [rated, setRated] = useState(prefs.rated ?? true);
+  const ratings = useRatings(profile.id);
+  const category = hasClock(tc) ? categoryOf(tc) : null;
+  // Rated: with a clock, from the starting position (a game from a chosen position is practice, not a rated game).
+  const canRate = !!category && start.length === 0;
+  const isRated = rated && canRate;
+  const current = ratings.byCategory[category ?? 'blitz'];
+  const fair = clampLevel(current.rating);
   const [downloaded, setDownloaded] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -186,9 +279,9 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
   }, []);
   useEffect(() => {
     // A level taken over from a game is not remembered as your usual choice.
-    localStorage.setItem('play-prefs', JSON.stringify({ level: setup?.level ? (prefs.level ?? level) : level, mode, coach, tc }));
+    localStorage.setItem('play-prefs', JSON.stringify({ level: setup?.level ? (prefs.level ?? level) : level, mode, coach, tc, rated }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, mode, coach, tc]);
+  }, [level, mode, coach, tc, rated]);
 
   const go = async () => {
     setError(null);
@@ -196,12 +289,14 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
       // Stockfish is not needed while playing; free its memory for Maia (matters on phones and tablets).
       engine.terminate();
       await loadMaia();
+      // Rated: the opponent plays like real opponents (not into your preparation), and no hints.
       onStart({
         start,
         color,
-        coach,
+        coach: isRated ? false : coach,
         tc,
-        settings: { level, playerRating: profileRating(profile), mode, speeds: profile.speeds },
+        rated: isRated,
+        settings: { level, playerRating: profileRating(profile), mode: isRated ? 'realistic' : mode, speeds: profile.speeds },
       });
     } catch (e) {
       setError((e as Error).message);
@@ -250,9 +345,9 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
             {/* Under the player's own rating on the slider, kept clear of the end labels. */}
             <span
               className="range-mark"
-              style={{ left: `${Math.min(82, Math.max(18, ((profileRating(profile) - MAIA_MIN) / (MAIA_MAX - MAIA_MIN)) * 100))}%` }}
+              style={{ left: `${Math.min(82, Math.max(18, (((isRated ? current.rating : profileRating(profile)) - MAIA_MIN) / (MAIA_MAX - MAIA_MIN)) * 100))}%` }}
             >
-              your rating ≈ {profileRating(profile)}
+              {isRated && category ? `your ${CATEGORY_NAMES[category].toLowerCase()} rating ${showRating(current)}` : `your rating ≈ ${profileRating(profile)}`}
             </span>
             <span>{MAIA_MAX}</span>
           </div>
@@ -272,10 +367,23 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
 
         <TimeSetting tc={tc} onChange={setTc} />
 
+        <RatedSetting
+          rated={rated}
+          canRate={canRate}
+          reason={!category ? 'Rated games need a clock.' : 'Rated games start from the starting position; this one is casual.'}
+          current={current}
+          category={category ? CATEGORY_NAMES[category].toLowerCase() : ''}
+          level={level}
+          white={color === 'white'}
+          fair={fair}
+          onRated={setRated}
+          onLevel={setLevel}
+        />
+
         <div className="field">
           <label>Opponent's opening choices</label>
-          <label className="row" style={{ alignItems: 'flex-start', cursor: 'pointer' }}>
-            <input type="radio" checked={mode === 'realistic'} onChange={() => setMode('realistic')} style={{ marginTop: 4 }} />
+          <label className={`row ${isRated ? 'disabled' : ''}`} style={{ alignItems: 'flex-start', cursor: isRated ? 'default' : 'pointer' }}>
+            <input type="radio" checked={isRated || mode === 'realistic'} disabled={isRated} onChange={() => setMode('realistic')} style={{ marginTop: 4 }} />
             <span>
               <b>Like real opponents</b>
               <div className="help">
@@ -284,8 +392,8 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
               </div>
             </span>
           </label>
-          <label className="row" style={{ alignItems: 'flex-start', cursor: 'pointer' }}>
-            <input type="radio" checked={mode === 'repertoire'} onChange={() => setMode('repertoire')} style={{ marginTop: 4 }} />
+          <label className={`row ${isRated ? 'disabled' : ''}`} style={{ alignItems: 'flex-start', cursor: isRated ? 'default' : 'pointer' }}>
+            <input type="radio" checked={!isRated && mode === 'repertoire'} disabled={isRated} onChange={() => setMode('repertoire')} style={{ marginTop: 4 }} />
             <span>
               <b>Stay inside my repertoire</b>
               <div className="help">
@@ -294,14 +402,15 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
               </div>
             </span>
           </label>
+          {isRated && <div className="help">In a rated game the opponent always plays like real opponents.</div>}
           {!getToken() && (
             <div className="help">Tip: connect Lichess in Settings so the opponent can use real game statistics.</div>
           )}
         </div>
 
-        <label className="row" style={{ cursor: 'pointer' }}>
-          <input type="checkbox" checked={coach} onChange={(e) => setCoach(e.target.checked)} />
-          Tell me when I leave my repertoire
+        <label className={`row ${isRated ? 'disabled' : ''}`} style={{ cursor: isRated ? 'default' : 'pointer' }}>
+          <input type="checkbox" checked={coach && !isRated} disabled={isRated} onChange={(e) => setCoach(e.target.checked)} />
+          Tell me when I leave my repertoire{isRated ? ' (not in rated games)' : ''}
         </label>
 
         {maia.status === 'downloading' && (
@@ -322,7 +431,8 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
           {downloaded === false && <span className="small muted">One-time download, then it works offline too.</span>}
         </div>
       </div>
-      <PlayHistory />
+      <RatingCard ratings={ratings} />
+      <PlayHistory ratings={ratings} />
       <div className="help">
         Opponent: Maia-3 by the CSSLab (University of Toronto) — a network trained on millions of human games that predicts
         what a player of a given rating would play. In the opening it uses the Lichess database at the same level, like Noctie.
@@ -424,11 +534,20 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
   const id = gameId(profile.id, `practice:${startedAt}`);
   const record = useRef({ moves, result, moveClocks });
   record.current = { moves, result, moveClocks };
+  // Rated: your rating in this tempo when the game began (shown during the game), and what the game did to it.
+  const ratings = useRatings(profile.id);
+  const category = config.rated ? categoryOf(tc) : null;
+  const ratingAtStart = useRef(category ? ratings.byCategory[category] : null).current;
+  const ratingStep = config.rated ? ratings.byGame.get(id) : undefined;
   const save = () => {
-    const { moves: ms, result: r, moveClocks: cs } = record.current;
+    const { moves: ms, moveClocks: cs } = record.current;
     // Only games in which you played a move.
     const mine = ms.slice(config.start.length).some((m) => turnOfKey(m.from) === config.color);
     if (!mine) return;
+    // A rated game you leave before it ends is lost, as on Lichess.
+    const r: Result | null =
+      record.current.result ??
+      (config.rated ? { text: 'You left the game', result: winner(otherSide(config.color)), termination: 'Abandoned' } : null);
     const me = { name: profile.name, elo: profileRating(profile) };
     const maia = { name: 'Maia', elo: config.settings.level };
     const now = Date.now();
@@ -446,7 +565,7 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
       playedAt: now,
       speed: timed ? speedFromTimeControl(tcPgn(tc)) : undefined,
       timeControl: timed ? tcPgn(tc) : undefined,
-      rated: false,
+      rated: config.rated,
       moves: ms.map((m) => m.san),
       clocks: timed ? cs : undefined,
       startPly: config.start.length || undefined,
@@ -466,6 +585,36 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A rated game is kept from your first move on, as lost until it ends: closing or reloading the page cannot undo a
+  // loss. When the page is hidden or closed, the moves so far are written too.
+  const myMoves = moves.slice(config.start.length).filter((m) => turnOfKey(m.from) === config.color).length;
+  const ratedOn = config.rated && myMoves > 0 && !result;
+  const keep = () => {
+    save();
+    void flushGames(); // written at once, not after the usual short delay
+  };
+  useEffect(() => {
+    if (ratedOn && myMoves === 1) keep();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ratedOn, myMoves]);
+  useEffect(() => {
+    if (!ratedOn) return;
+    const onHide = () => document.visibilityState === 'hidden' && keep();
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ''; // older Safari
+    };
+    addEventListener('pagehide', keep);
+    addEventListener('beforeunload', warn);
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      removeEventListener('pagehide', keep);
+      removeEventListener('beforeunload', warn);
+      document.removeEventListener('visibilitychange', onHide);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ratedOn]);
+
   // While the game goes on, the analysis of other games waits (Maia and the clock need the computer).
   useEffect(() => {
     holdForGame(!result);
@@ -481,7 +630,7 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
   const key = moves.at(-1)?.to ?? START_KEY;
   const turn = turnOfKey(key);
   const myTurn = turn === config.color;
-  const coachRep: Repertoire | null = config.coach && rep && rep.side === config.color ? rep : null;
+  const coachRep: Repertoire | null = config.coach && !config.rated && rep && rep.side === config.color ? rep : null;
   // Still inside the repertoire: every move so far is a prepared move.
   const inBook = useMemo(() => !!rep && moves.every((m) => !!findMove(rep, m.from, m.uci)), [rep, moves]);
 
@@ -643,7 +792,11 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
           />
         </div>
         <div className="clock-bar">
-          <span className="bar-name small muted">You{clock ? ` · ${tcLabel(tc)}` : ''}</span>
+          <span className="bar-name small muted">
+            You{ratingAtStart ? ` ${showRating(ratingAtStart)}` : ''}
+            {clock ? ` · ${tcLabel(tc)}` : ''}
+            {config.rated ? ' · rated' : ''}
+          </span>
           <CapturedPieces pieces={taken[config.color]} color={botSide} plus={ahead(config.color)} />
           {face(config.color, 'You')}
         </div>
@@ -658,13 +811,25 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
               <b>Maia {config.settings.level}</b>
               <div className="small muted">
                 {levelName(config.settings.level)} · plays {config.color === 'white' ? 'Black' : 'White'} · {tcLabel(tc)}
+                {category ? ` · rated ${CATEGORY_NAMES[category].toLowerCase()}` : ''}
               </div>
             </div>
             <span className="spacer" />
-            {inBook && rep && <span className="badge mine">in your repertoire</span>}
+            {inBook && rep && !config.rated && <span className="badge mine">in your repertoire</span>}
           </div>
           <OpeningLabel keys={history} />
           <div className={`feedback ${result ? 'info' : myTurn ? 'good' : 'info'}`}>{status}</div>
+          {result && category && ratingStep && (
+            <div className="row wrap rating-result">
+              <span className="muted">{CATEGORY_NAMES[category]} rating</span>
+              <span className="num">{Math.round(ratingStep.before)}</span>→
+              <b className="num">{showRating({ rating: ratingStep.after, provisional: ratingStep.provisional })}</b>
+              <RatingDiff before={ratingStep.before} after={ratingStep.after} />
+            </div>
+          )}
+          {config.rated && !result && (
+            <div className="small muted">Rated game: no take-backs; leaving the game counts as a loss.</div>
+          )}
           {notice && (
             <div className="notice small row wrap">
               <span style={{ flex: 1 }}>{notice.text}</span>
@@ -685,9 +850,11 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
           )}
           <MoveList moves={moves} sources={sources} />
           <div className="row wrap">
-            <button className="btn" onClick={takeBack} disabled={thinking || flaggedOut || moves.length <= config.start.length}>
-              <Icon name="undo" size={16} /> Take back
-            </button>
+            {!config.rated && (
+              <button className="btn" onClick={takeBack} disabled={thinking || flaggedOut || moves.length <= config.start.length}>
+                <Icon name="undo" size={16} /> Take back
+              </button>
+            )}
             {!result ? (
               <button
                 className="btn"
@@ -712,6 +879,8 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
               <span className="small muted">Saved in your practice games.</span>
             </div>
           )}
+          {/* During a rated game: no analysis, no copying the game out (only after it ends). */}
+          {!(config.rated && !result) && (
           <div className="row wrap">
             <button className="btn sm ghost" onClick={() => openLine(moves)} title="Load this game on the build board to add moves to your repertoire">
               <Icon name="board" size={14} /> Open in Build
@@ -735,6 +904,7 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
               New game…
             </button>
           </div>
+          )}
         </div>
         <div className="help">
           Tags: <span className="badge mine">book</span> your prepared line · <span className="badge accent">db</span> Lichess

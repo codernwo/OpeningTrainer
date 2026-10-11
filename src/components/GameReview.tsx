@@ -15,7 +15,8 @@ import {
 import { needsAnalysis, pauseQueue, useAnalysisQueue } from '../lib/analyzer';
 import { lichessAnalysisUrl, moveFromBoard, playSan, playUci, sanToUci, START_KEY, uciToArrow, type Side } from '../lib/chess';
 import { formatClock, formatDate, gameLabel, gameLine, moveTime, opponentOf, SPEED_NAMES, type PlayedGame } from '../lib/games';
-import { useGames } from '../lib/gamesStore';
+import { useGames, useRatings } from '../lib/gamesStore';
+import { CATEGORY_NAMES, showRating } from '../lib/rating';
 import { useKey } from '../lib/hooks';
 import { cardFromMoment, mistakeId } from '../lib/mistakes';
 import { useApp } from '../lib/store';
@@ -28,6 +29,7 @@ import { ThemeChips } from './ThemeChips';
 import { Board, moveArrow, type Shape } from './Board';
 import { EvalGraph, EvalGraphLegend } from './EvalGraph';
 import { Icon } from './Icon';
+import { RatingDiff } from './RatingDiff';
 
 interface Retry {
   moment: KeyMoment;
@@ -172,6 +174,9 @@ export function GameReview({ game }: { game: PlayedGame }) {
     showToast('Game deleted', { label: 'Undo', run: () => useGames.getState().restoreGames([game]) });
   };
 
+  // A rated practice game: what it did to your rating. It stays (your rating is made of these games).
+  const ratingStep = useRatings(game.profileId).byGame.get(game.id);
+
   const opp = opponentOf(game);
   const sym = (i: number) => {
     const x = v[i];
@@ -198,9 +203,11 @@ export function GameReview({ game }: { game: PlayedGame }) {
               <Icon name="external" size={14} /> {game.url.includes('lichess.org') ? 'On Lichess' : game.url.includes('chess.com') ? 'On Chess.com' : 'Original'}
             </a>
           )}
-          <button className="btn sm icon ghost danger" onClick={deleteGame} title="Delete this game">
-            <Icon name="trash" size={15} />
-          </button>
+          {!ratingStep && (
+            <button className="btn sm icon ghost danger" onClick={deleteGame} title="Delete this game">
+              <Icon name="trash" size={15} />
+            </button>
+          )}
         </div>
         <div>
           <h2 className="review-title">
@@ -214,6 +221,14 @@ export function GameReview({ game }: { game: PlayedGame }) {
             {game.speed ? ` · ${SPEED_NAMES[game.speed]}` : ''}
             {game.opening ? ` · ${game.opening}` : ''} · you played {side}
           </div>
+          {ratingStep && (
+            <div className="small row wrap rating-result">
+              <span className="muted">Rated · {CATEGORY_NAMES[ratingStep.category]} rating</span>
+              <span className="num">{Math.round(ratingStep.before)}</span>→
+              <b className="num">{showRating({ rating: ratingStep.after, provisional: ratingStep.provisional })}</b>
+              <RatingDiff before={ratingStep.before} after={ratingStep.after} />
+            </div>
+          )}
           {!game.opening && <OpeningLabel keys={keys} />}
         </div>
       </div>

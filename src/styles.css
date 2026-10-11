@@ -2849,3 +2849,32 @@ a.btn {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Rating against Maia */
+.rating-diff {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.rating-diff.up {
+  color: var(--mine);
+}
+.rating-diff.down {
+  color: var(--gap);
+}
+.rating-result {
+  gap: 6px;
+  align-items: baseline;
+}
+.rating-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+@media (max-width: 520px) {
+  .rating-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+label.row.disabled {
+  opacity: 0.55;
+}

@@ -14,6 +14,7 @@ import { GameReview } from './GameReview';
 import { Icon } from './Icon';
 import { fetchNewLichessGames, hasFetchedBefore, ImportGamesDialog } from './ImportGamesDialog';
 import { InsightsView } from './InsightsView';
+import { RatingDiff } from './RatingDiff';
 import { themesOf } from '../lib/themes';
 import { ThemeChips } from './ThemeChips';
 
@@ -293,7 +294,7 @@ export function AnalysisPill() {
 
 const RESULT_BADGE = { win: ['W', 'mine'], loss: ['L', 'gap'], draw: ['½', ''] } as const;
 
-export function GameRow({ game, analysing }: { game: PlayedGame; analysing: boolean }) {
+export function GameRow({ game, analysing, rating }: { game: PlayedGame; analysing: boolean; rating?: { before: number; after: number } }) {
   const openGame = useApp((s) => s.openGame);
   const o = outcome(game);
   const [letter, cls] = o ? RESULT_BADGE[o] : ['·', ''];
@@ -314,6 +315,12 @@ export function GameRow({ game, analysing }: { game: PlayedGame; analysing: bool
         <span className="small muted">
           {game.myColor === 'white' ? '♔ White' : '♚ Black'}
           {game.source === 'practice' ? ` · ${tcShort(game.timeControl) ?? 'no clock'}` : game.speed ? ` · ${SPEED_NAMES[game.speed]}` : ''}
+          {rating && (
+            <>
+              {' · rated '}
+              <RatingDiff before={rating.before} after={rating.after} />
+            </>
+          )}
           {game.opening ? ` · ${game.opening}` : ''}
           {` · ${Math.ceil(game.moves.length / 2)} ${Math.ceil(game.moves.length / 2) === 1 ? 'move' : 'moves'}`}
         </span>

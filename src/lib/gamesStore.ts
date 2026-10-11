@@ -1,10 +1,12 @@
 // Your imported games: kept in the browser (IndexedDB) next to the app data, and synced to their own file in
 // Google Drive (see sync.ts), so the repertoire file stays small and quick to sync.
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createStore, get as idbGet, set as idbSet } from 'idb-keyval';
 import { configureQueue, kickQueue, needsAnalysis, needsMaia, queueStateChanged, ratingFor, skipCurrent, useAnalysisQueue } from './analyzer';
 import type { GameAnalysis } from './analysis';
 import { EMPTY_GAMES, type GamesData, type PlayedGame } from './games';
+import { ratingsFrom, type Ratings } from './rating';
 import { profileRating, useApp } from './store';
 import { initWakeLock } from './wakeLock';
 
@@ -100,6 +102,12 @@ function completion(old: PlayedGame, next: PlayedGame): Partial<PlayedGame> | nu
 /** Older Lichess games without clock times (fetched before the app kept them); daily games have none. */
 export function lichessGamesWithoutClocks(games: readonly PlayedGame[]): PlayedGame[] {
   return games.filter((g) => g.id.includes('|lichess:') && g.speed !== 'correspondence' && !g.clocks?.some((c) => c !== null));
+}
+
+/** A player's ratings against Maia, worked out from their rated practice games (see rating.ts). */
+export function useRatings(profileId: string | null): Ratings {
+  const games = useGames((s) => s.data.games);
+  return useMemo(() => ratingsFrom(games.filter((g) => g.profileId === profileId)), [games, profileId]);
 }
 
 export function gamesOf(data: GamesData, profileId: string | null): PlayedGame[] {

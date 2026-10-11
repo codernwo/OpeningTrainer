@@ -63,8 +63,9 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
           </dd>
           <dt>Play</dt>
           <dd>
-            Practice games against Maia-3, a human-like opponent, at any rating from 600 to 2600, with or without a clock. Your
-            games are kept: analyse them and turn your mistakes into training cards.
+            Practice games against Maia-3, a human-like opponent, at any rating from 600 to 2600, with or without a clock.
+            Rated games give you a rating against Maia per tempo (bullet, blitz, rapid, classical), worked out like on
+            Lichess and starting at 400. Your games are kept: analyse them and turn your mistakes into training cards.
           </dd>
           <dt>Games</dt>
           <dd>
