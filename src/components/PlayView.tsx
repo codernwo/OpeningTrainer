@@ -5,6 +5,8 @@ import { gameId, speedFromTimeControl, type GameResult, type PlayedGame } from '
 import { holdForGame, useGames } from '../lib/gamesStore';
 import { useAnalysisQueue } from '../lib/analyzer';
 import { playMoveSound, playSound } from '../lib/sound';
+import { capturedBy, materialBalance, type Captured } from '../lib/material';
+import { createElement } from 'react';
 import { loadMaia, MAIA_DOWNLOAD_MB, MAIA_MAX, MAIA_MIN, isMaiaDownloaded, useMaia } from '../lib/maia';
 import { chooseOpponentMove, type MoveSource, type OpponentSettings } from '../lib/opponent';
 import { findMove, movesAt, type Repertoire } from '../lib/repertoire';
@@ -373,6 +375,19 @@ function ClockFace({ ms, running, low, label }: { ms: number; running: boolean; 
 
 const LOW_TIME = 10_000;
 
+/** The pieces one side has taken (drawn like the board's pieces, in the colour of their owner), and its material
+ *  advantage when it has one. */
+function CapturedPieces({ pieces, color, plus }: { pieces: Captured[]; color: Side; plus: number }) {
+  return (
+    <span className="captured cg-wrap" title={pieces.length ? `Captured: ${pieces.join(', ')}` : undefined}>
+      {pieces.map((role, i) =>
+        createElement('piece', { key: i, className: `${role} ${color}${i > 0 && pieces[i - 1] !== role ? ' gap' : ''}` }),
+      )}
+      {plus > 0 && <span className="material-plus">+{plus}</span>}
+    </span>
+  );
+}
+
 function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: () => void; onRematch: () => void }) {
   const rep = useApp(activeRep);
   const profile = useApp(activeProfile)!;
@@ -458,6 +473,8 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
 
   useEffect(() => {
     playSound('GenericNotify');
+    // The board in full view from the first move on (on a phone the setup may have been scrolled down).
+    window.scrollTo({ top: 0 });
   }, []);
 
   const key = moves.at(-1)?.to ?? START_KEY;
@@ -603,16 +620,18 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
         label={label}
       />
     );
+  const taken = useMemo(() => capturedBy(moves), [moves]);
+  const balance = useMemo(() => materialBalance(key), [key]);
+  const ahead = (side: Side) => (side === 'white' ? balance : -balance);
 
   return (
     <div className="train">
-      <div className={`board-col ${clock ? 'with-clocks' : ''}`}>
-        {clock && (
-          <div className="clock-bar">
-            <span className="small muted">Maia {config.settings.level}</span>
-            {face(botSide, 'Maia')}
-          </div>
-        )}
+      <div className="board-col with-bars">
+        <div className="clock-bar">
+          <span className="bar-name small muted">Maia {config.settings.level}</span>
+          <CapturedPieces pieces={taken[botSide]} color={config.color} plus={ahead(botSide)} />
+          {face(botSide, 'Maia')}
+        </div>
         <div className="board-area">
           <Board
             position={key}
@@ -622,12 +641,11 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
             onMove={onMove}
           />
         </div>
-        {clock && (
-          <div className="clock-bar">
-            <span className="small muted">You · {tcLabel(tc)}</span>
-            {face(config.color, 'You')}
-          </div>
-        )}
+        <div className="clock-bar">
+          <span className="bar-name small muted">You{clock ? ` · ${tcLabel(tc)}` : ''}</span>
+          <CapturedPieces pieces={taken[config.color]} color={botSide} plus={ahead(config.color)} />
+          {face(config.color, 'You')}
+        </div>
       </div>
       <div className="stack">
         <div className="card card-pad stack">
@@ -726,24 +744,24 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
 }
 
 function MoveList({ moves, sources }: { moves: PlayedMove[]; sources: Source[] }) {
-  const end = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    // Braces matter: newer browsers return a Promise from scrollIntoView, and an effect must
-    // return nothing or a cleanup function.
-    end.current?.scrollIntoView({ block: 'nearest' });
+    // Scroll the list itself to the newest move. (scrollIntoView would scroll the whole page too: on a phone, where the
+    // list is under the board, the board would slide out of view after every move.)
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [moves.length]);
   if (!moves.length) return <div className="small faint">No moves yet.</div>;
   const tag = (s: Source) =>
     s === 'repertoire' ? <span className="badge mine">book</span> : s === 'database' ? <span className="badge accent">db</span> : s === 'maia' ? <span className="badge">maia</span> : null;
   return (
-    <div style={{ maxHeight: 220, overflow: 'auto', lineHeight: 2 }}>
+    <div ref={box} style={{ maxHeight: 220, overflow: 'auto', lineHeight: 2 }}>
       {moves.map((m, i) => (
         <span key={i} style={{ marginRight: 6, whiteSpace: 'nowrap', opacity: sources[i] === 'start' ? 0.6 : 1 }}>
           {i % 2 === 0 && <span className="faint">{i / 2 + 1}. </span>}
           <b>{m.san}</b> {tag(sources[i])}
         </span>
       ))}
-      <div ref={end} />
     </div>
   );
 }

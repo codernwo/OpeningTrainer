@@ -2692,7 +2692,7 @@ a.btn {
   gap: 6px;
 }
 
-.board-col.with-clocks {
+.board-col.with-bars {
   --board: min(calc(100vh - 290px), calc(100vw - 560px), 680px);
 }
 
@@ -2751,7 +2751,7 @@ a.btn {
 }
 
 @media (max-width: 900px) {
-  .board-col.with-clocks {
+  .board-col.with-bars {
     --board: min(calc(100vw - 58px), 560px);
   }
 }
@@ -2763,4 +2763,52 @@ a.btn {
   .clock {
     font-size: 20px;
   }
+}
+
+.clock-bar {
+  min-height: 34px;
+}
+
+.clock-bar .bar-name {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Captured pieces, drawn with the board's own piece images (chessground's .cg-wrap piece rules), small and overlapping
+   per kind, like on chess.com and Lichess. */
+.captured.cg-wrap {
+  position: static;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  overflow: hidden;
+}
+
+.captured.cg-wrap piece {
+  position: static;
+  display: inline-block;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: -8px;
+  transform: none;
+  z-index: auto;
+  will-change: auto;
+}
+
+.captured.cg-wrap piece.gap {
+  margin-left: 10px;
+}
+
+.material-plus {
+  margin-left: 12px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
