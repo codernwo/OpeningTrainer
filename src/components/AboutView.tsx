@@ -153,7 +153,8 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
         <h2>Credits</h2>
         <p>
           Lichess (the chessground board, chessops, the opening database and cloud evaluations), Stockfish, Maia-3 by the CSSLab at
-          the University of Toronto, FSRS (ts-fsrs) and ONNX Runtime Web. The sounds were made by Enigmahack for Lichess (AGPL-3.0).
+          the University of Toronto, FSRS (ts-fsrs) and ONNX Runtime Web. The sounds were made by Enigmahack for Lichess (AGPL-3.0); the opening names come from Lichess' public-domain list
+          (lichess-org/chess-openings).
           The app as a whole is free software under the GNU GPL v3.
         </p>
       </section>

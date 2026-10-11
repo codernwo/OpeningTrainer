@@ -25,6 +25,7 @@ import { Board, moveArrow, sideCircle, type Shape } from './Board';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { LineReviewSession } from './LineReview';
+import { OpeningLabel } from './OpeningLabel';
 import { DeckTabs, MistakesTrain } from './MistakesTrain';
 import { SavedNote, saveMessage } from './SaveIndicator';
 
@@ -595,6 +596,7 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
             <div style={{ width: `${(index / Math.max(1, queue.length)) * 100}%` }} />
           </div>
           <div className="small muted">{context || 'Starting position'}</div>
+          <OpeningLabel keys={path.map((p) => p.to)} />
           <div className={`feedback ${phase === 'good' ? 'good' : phase === 'bad' || mistake ? 'bad' : 'info'}`}>
             {message ?? (item.kind === 'retry' ? 'Once more: what do you play here?' : 'What do you play here?')}
           </div>
@@ -763,6 +765,7 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
             <span className="badge gap">{stats.bad} wrong</span>
           </div>
           <div className="small muted">{formatLine(line) || 'Starting position'}</div>
+          <OpeningLabel keys={(lineFromSans(line) ?? []).map((m) => m.to)} />
           <div className="feedback info">{message ?? (isMine(rep, pos) ? (movesAt(rep, pos).length ? 'Your move.' : 'Nothing prepared here.') : 'Opponent is thinking…')}</div>
           <div className="row">
             <button className="btn" onClick={restart}>

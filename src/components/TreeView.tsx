@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { loadOpenings, shortName, useOpeningNames, useOpenings } from '../lib/openings';
 import { formatLine, keyToFen, moveNumber, uciToArrow } from '../lib/chess';
 import { lossLabel } from '../lib/audit';
 import { useKey } from '../lib/hooks';
@@ -33,15 +34,49 @@ const PAD = 16;
 const GUTTER = 44;
 const LABEL_FONT = '600 12.5px system-ui, sans-serif';
 const SMALL_FONT = '500 11px system-ui, sans-serif';
+const NAME_FONT = '600 10.5px system-ui, sans-serif';
+/** Room above a box for the opening name of the branch it starts. */
+const NAME_H = 14;
+/** Top-down: height of one level (box, toggle and the curve to the next level). */
+const LEVEL_H = 64;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 2.5;
+
+type Orientation = 'lr' | 'td';
+
+function readOrientation(): Orientation {
+  try {
+    const o = localStorage.getItem('tree-orientation');
+    if (o === 'lr' || o === 'td') return o;
+  } catch {
+    /* ignore */
+  }
+  // On a narrow (phone) screen the tree reads better top-down.
+  return typeof innerWidth !== 'undefined' && innerWidth < 700 ? 'td' : 'lr';
+}
+
+/** `text`, shortened with an ellipsis to fit `max` pixels. */
+function fitText(text: string, font: string, max: number): string {
+  if (textWidth(text, font) <= max) return text;
+  let t = text;
+  while (t.length > 1 && textWidth(`${t}…`, font) > max) t = t.slice(0, -1);
+  return `${t.trimEnd()}…`;
+}
 
 type Highlight = 'none' | 'due' | 'flags' | 'rare';
 
 interface LNode {
   id: string;
   col: number;
+  /** Place among the leaves (a leaf's index; a branch sits in the middle of its children). */
+  pos: number;
+  /** Left edge of the box. */
   x: number;
+  /** Centre of the box. */
   y: number;
   w: number;
+  /** The opening name this move starts (what it adds to the branch's name), shown above the box. */
+  name?: { short: string; full: string; shown: string };
   label: string;
   node: TreeNode | null; // null = root or gap ghost
   ghost?: { san: string; share: number };
@@ -93,7 +128,23 @@ export function TreeView() {
   const [hovered, setHovered] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<Highlight>('none');
   const [showGaps, setShowGaps] = useState(true);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoomState] = useState(1);
+  const [orientation, setOrientationState] = useState<Orientation>(readOrientation);
+  const setOrientation = (o: Orientation) => {
+    setOrientationState(o);
+    try {
+      localStorage.setItem('tree-orientation', o);
+    } catch {
+      /* ignore */
+    }
+  };
+  const showNames = useOpeningNames((s) => s.on);
+  const setShowNames = useOpeningNames((s) => s.set);
+  const openings = useOpenings((s) => s.byKey);
+  useEffect(() => {
+    if (showNames) void loadOpenings();
+  }, [showNames]);
+  const names = showNames && !!openings;
   const [cacheTick, setCacheTick] = useState(0);
   const [dialog, setDialog] = useState<{ title: string; body: React.ReactNode; choices: Choice[] } | null>(null);
 
@@ -117,7 +168,7 @@ export function TreeView() {
   const isOpen = (n: TreeNode) => n.children.length > 0 && (n.ply < depth - 1) !== toggled.has(n.id);
 
   const layout = useMemo(() => {
-    let row = 0;
+    let leaf = 0;
     const nodes: LNode[] = [];
     const ghostsAt = (key: string, ply: number, prepared: string[]): LNode[] => {
       if (!showGaps || isMine(rep, key) || !prepared.length) return [];
@@ -133,8 +184,9 @@ export function TreeView() {
           const g: LNode = {
             id: `gap:${key}:${m.san}`,
             col: ply + 1,
+            pos: leaf++,
             x: 0,
-            y: PAD + row++ * ROW_H,
+            y: 0,
             w: boxWidth(label, formatPct(share)),
             label,
             node: null,
@@ -146,40 +198,49 @@ export function TreeView() {
           return g;
         });
     };
-    const place = (n: TreeNode): LNode => {
+    const place = (n: TreeNode, parentName: string | undefined): LNode => {
       const parentStats = n.mine ? undefined : explorerFor(profile, n.from);
       // Moves outside the explorer's top list come back as 0: too rare to label.
       const rawShare = shareOf(parentStats, n.san);
       const share = rawShare ? rawShare : undefined;
       const flag = rep.engine[n.id];
       const label = `${moveNumber(n.ply, true)}${n.san}${flag ? lossLabel(flag.loss).symbol : ''}${n.transposition ? ' ↪' : ''}`;
+      // A move that reaches a newly named opening position carries that name; its branch inherits it.
+      // The list sometimes gives a later position a more general name (1.e4 c5 2.Nf3 d6 is "Modern Variations",
+      // 3.d4 only "Sicilian Defense"): that is no new opening, the branch keeps its more specific name.
+      const o = names ? openings!.get(n.to) : undefined;
+      const named = o && o.name !== parentName && !(parentName && parentName.startsWith(o.name)) ? o : undefined;
       const ln: LNode = {
         id: n.id,
         col: n.ply + 1,
+        pos: 0,
         x: 0,
         y: 0,
         w: boxWidth(label, share !== undefined ? formatPct(share) : undefined),
         label,
+        name: named ? { short: shortName(named.name, parentName), full: `${named.eco} · ${named.name}`, shown: '' } : undefined,
         node: n,
         share,
         open: isOpen(n),
         children: [],
       };
       nodes.push(ln);
-      if (ln.open) ln.children = n.children.map(place);
+      const branchName = named?.name ?? parentName;
+      if (ln.open) ln.children = n.children.map((c) => place(c, branchName));
       if (!n.transposition && (ln.open || !n.children.length)) {
         ln.children.push(...ghostsAt(n.to, n.ply + 1, movesAt(rep, n.to).map((m) => m.san)));
       }
-      ln.y = ln.children.length ? (ln.children[0].y + ln.children.at(-1)!.y) / 2 : PAD + row++ * ROW_H;
+      ln.pos = ln.children.length ? (ln.children[0].pos + ln.children.at(-1)!.pos) / 2 : leaf++;
       return ln;
     };
-    const rootChildren = tree.map(place);
+    const rootChildren = tree.map((n) => place(n, undefined));
     rootChildren.push(...ghostsAt(ROOT, 0, movesAt(rep, ROOT).map((m) => m.san)));
     const root: LNode = {
       id: 'root',
       col: 0,
+      pos: rootChildren.length ? (rootChildren[0].pos + rootChildren.at(-1)!.pos) / 2 : 0,
       x: 0,
-      y: rootChildren.length ? (rootChildren[0].y + rootChildren.at(-1)!.y) / 2 : PAD,
+      y: 0,
       w: 56,
       label: 'Start',
       node: null,
@@ -187,20 +248,42 @@ export function TreeView() {
       children: rootChildren,
     };
     nodes.push(root);
-    // Columns are as wide as their widest label.
-    const colW: number[] = [];
-    for (const n of nodes) colW[n.col] = Math.max(colW[n.col] ?? 0, n.w);
-    const colX: number[] = [];
-    let x = PAD;
-    for (let c = 0; c < colW.length; c++) {
-      colX[c] = x;
-      x += (colW[c] ?? 40) + GUTTER;
+    const leaves = Math.max(leaf, 1);
+    const nameH = names ? NAME_H : 0;
+    const maxCol = Math.max(...nodes.map((n) => n.col));
+
+    if (orientation === 'lr') {
+      // Columns (one per half-move) as wide as their widest label; leaves one row each.
+      const rowH = ROW_H + nameH;
+      const colW: number[] = [];
+      for (const n of nodes) colW[n.col] = Math.max(colW[n.col] ?? 0, n.w);
+      const colX: number[] = [];
+      let x = PAD;
+      for (let c = 0; c < colW.length; c++) {
+        colX[c] = x;
+        x += (colW[c] ?? 40) + GUTTER;
+      }
+      for (const n of nodes) {
+        n.x = colX[n.col];
+        n.y = PAD + nameH + BOX_H / 2 + n.pos * rowH;
+        if (n.name) n.name.shown = fitText(n.name.short, NAME_FONT, (colW[n.col] ?? 60) + GUTTER - 6);
+      }
+      const maxX = Math.max(...nodes.map((n) => n.x + n.w));
+      return { nodes, root, width: maxX + PAD + 40, height: leaves * rowH + PAD * 2 };
     }
-    for (const n of nodes) n.x = colX[n.col];
-    const maxX = Math.max(...nodes.map((n) => n.x + n.w));
-    return { nodes, root, width: maxX + PAD + 40, height: Math.max(row, 1) * ROW_H + PAD * 2 };
+
+    // Top-down: one level per half-move; the leaves side by side, each as wide as the widest box.
+    const nameW = Math.min(120, Math.max(0, ...nodes.map((n) => (n.name ? textWidth(n.name.short, NAME_FONT) : 0))));
+    const slot = Math.max(64, nameW, ...nodes.map((n) => n.w)) + 14;
+    const levelH = LEVEL_H + nameH;
+    for (const n of nodes) {
+      n.x = PAD + n.pos * slot + (slot - n.w) / 2;
+      n.y = PAD + nameH + BOX_H / 2 + n.col * levelH;
+      if (n.name) n.name.shown = fitText(n.name.short, NAME_FONT, slot - 6);
+    }
+    return { nodes, root, width: PAD * 2 + leaves * slot, height: PAD * 2 + (maxCol + 1) * levelH };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tree, depth, toggled, showGaps, rep, profile, cacheTick]);
+  }, [tree, depth, toggled, showGaps, rep, profile, cacheTick, orientation, names, openings]);
 
   const toggle = (id: string) =>
     setToggled((s) => {
@@ -270,10 +353,108 @@ export function TreeView() {
     [selectedNode, rep],
   );
 
-  // Drag-to-pan on the background.
+  // Zoom keeps the point under the cursor (or between the fingers) in place.
   const scroller = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const pendingScroll = useRef<{ left: number; top: number } | null>(null);
+  const zoomTo = (next: number, anchor?: { x: number; y: number }) => {
+    const el = scroller.current;
+    const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+    const z0 = zoomRef.current;
+    if (el && z !== z0) {
+      const a = anchor ?? { x: el.clientWidth / 2, y: el.clientHeight / 2 };
+      pendingScroll.current = { left: ((el.scrollLeft + a.x) / z0) * z - a.x, top: ((el.scrollTop + a.y) / z0) * z - a.y };
+    }
+    zoomRef.current = z;
+    setZoomState(z);
+  };
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el && pendingScroll.current) {
+      el.scrollLeft = pendingScroll.current.left;
+      el.scrollTop = pendingScroll.current.top;
+      pendingScroll.current = null;
+    }
+  }, [zoom]);
+  const fit = () => {
+    const el = scroller.current;
+    if (!el) return;
+    zoomTo(Math.min(1, (el.clientWidth - 8) / layout.width, (el.clientHeight - 8) / layout.height));
+    pendingScroll.current = { left: 0, top: 0 };
+  };
+
+  // Ctrl + wheel (and a trackpad pinch, which the browser reports as one) zooms.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      // A mouse wheel notch (±100) zooms about 20%; a trackpad pinch sends many small steps.
+      const step = Math.max(-50, Math.min(50, e.deltaY));
+      zoomTo(zoomRef.current * Math.exp(-step * 0.004), { x: e.clientX - r.left, y: e.clientY - r.top });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tree.length > 0]);
+
+  // Drag (mouse or one finger) pans; two fingers pinch to zoom. A tap or click without moving still selects a move.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<{ x: number; y: number; left: number; top: number; moved: boolean; dist?: number; zoom?: number } | null>(null);
+  const swallowClick = useRef(false);
   const [dragging, setDragging] = useState(false);
+  const startPan = (x: number, y: number) => {
+    const el = scroller.current!;
+    gesture.current = { x, y, left: el.scrollLeft, top: el.scrollTop, moved: false };
+  };
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 1) startPan(e.clientX, e.clientY);
+    else if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      gesture.current = { x: 0, y: 0, left: 0, top: 0, moved: true, dist: Math.hypot(a.x - b.x, a.y - b.y), zoom: zoomRef.current };
+    }
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!pointers.current.has(e.pointerId) || !gesture.current) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const g = gesture.current;
+    const el = scroller.current!;
+    if (pointers.current.size >= 2 && g.dist) {
+      const [a, b] = [...pointers.current.values()];
+      const r = el.getBoundingClientRect();
+      zoomTo(g.zoom! * (Math.hypot(a.x - b.x, a.y - b.y) / g.dist), { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top });
+      return;
+    }
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    if (!g.moved && Math.hypot(dx, dy) > 6) {
+      g.moved = true;
+      setDragging(true);
+    }
+    if (g.moved) {
+      el.scrollLeft = g.left - dx;
+      el.scrollTop = g.top - dy;
+    }
+  };
+  const onPointerEnd = (e: React.PointerEvent) => {
+    if (!pointers.current.delete(e.pointerId)) return;
+    if (gesture.current?.moved) swallowClick.current = true;
+    if (pointers.current.size === 1) {
+      // From a pinch back to one finger: go on panning from here.
+      const [p] = [...pointers.current.values()];
+      startPan(p.x, p.y);
+      gesture.current!.moved = true;
+    } else if (!pointers.current.size) {
+      gesture.current = null;
+      setDragging(false);
+      setTimeout(() => (swallowClick.current = false), 0);
+    }
+  };
 
   const allIds = () => [...byId.values()].filter((n) => n.children.length).map((n) => n.id);
 
@@ -307,28 +488,57 @@ export function TreeView() {
           <label className="row small" style={{ gap: 4 }}>
             <input type="checkbox" checked={showGaps} onChange={(e) => setShowGaps(e.target.checked)} /> gaps
           </label>
-          <button className="btn sm icon" onClick={() => setZoom((z) => Math.max(0.4, z - 0.15))} title="Uitzoomen">
-            −
-          </button>
-          <button className="btn sm icon" onClick={() => setZoom((z) => Math.min(1.8, z + 0.15))} title="Inzoomen">
-            +
-          </button>
+          <label className="row small" style={{ gap: 4 }} title="Opening names where a branch starts a named opening">
+            <input type="checkbox" checked={showNames} onChange={(e) => setShowNames(e.target.checked)} /> names
+          </label>
+          <span className="tree-tools">
+            <button
+              className={`btn sm icon ${orientation === 'lr' ? 'on' : ''}`}
+              aria-pressed={orientation === 'lr'}
+              onClick={() => setOrientation('lr')}
+              title="Left to right"
+            >
+              <Icon name="next" size={15} />
+            </button>
+            <button
+              className={`btn sm icon ${orientation === 'td' ? 'on' : ''}`}
+              aria-pressed={orientation === 'td'}
+              onClick={() => setOrientation('td')}
+              title="Top down"
+            >
+              <Icon name="next" size={15} className="rot90" />
+            </button>
+          </span>
+          <span className="tree-tools">
+            <button className="btn sm icon" onClick={() => zoomTo(zoom / 1.25)} disabled={zoom <= MIN_ZOOM} title="Zoom out (Ctrl + scroll, or pinch)">
+              <Icon name="zoomOut" size={16} />
+            </button>
+            <button className="btn sm ghost num zoom-pct" onClick={() => zoomTo(1)} title="Back to 100%">
+              {Math.round(zoom * 100)}%
+            </button>
+            <button className="btn sm icon" onClick={() => zoomTo(zoom * 1.25)} disabled={zoom >= MAX_ZOOM} title="Zoom in (Ctrl + scroll, or pinch)">
+              <Icon name="zoomIn" size={16} />
+            </button>
+            <button className="btn sm icon" onClick={fit} title="Fit the whole tree">
+              <Icon name="fit" size={15} />
+            </button>
+          </span>
         </div>
         <div
           ref={scroller}
           className={`tree-scroll ${dragging ? 'dragging' : ''}`}
-          onMouseDown={(e) => {
-            if ((e.target as Element).closest('.node, .toggle, .gap-node')) return;
-            drag.current = { x: e.clientX, y: e.clientY, left: scroller.current!.scrollLeft, top: scroller.current!.scrollTop };
-            setDragging(true);
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+          onPointerLeave={(e) => e.pointerType === 'mouse' && onPointerEnd(e)}
+          onClickCapture={(e) => {
+            // The end of a drag is not a click on the move under the pointer.
+            if (swallowClick.current) {
+              e.stopPropagation();
+              swallowClick.current = false;
+            }
           }}
-          onMouseMove={(e) => {
-            if (!drag.current || !scroller.current) return;
-            scroller.current.scrollLeft = drag.current.left - (e.clientX - drag.current.x);
-            scroller.current.scrollTop = drag.current.top - (e.clientY - drag.current.y);
-          }}
-          onMouseUp={() => ((drag.current = null), setDragging(false))}
-          onMouseLeave={() => ((drag.current = null), setDragging(false))}
         >
           {tree.length === 0 ? (
             <div className="empty" style={{ margin: 24 }}>
@@ -341,7 +551,7 @@ export function TreeView() {
               height={layout.height * zoom}
               viewBox={`0 0 ${layout.width} ${layout.height}`}
             >
-              <Edges root={layout.root} />
+              <Edges root={layout.root} orientation={orientation} />
               {layout.nodes.map((ln) => {
                 if (ln.ghost) {
                   return (
@@ -383,8 +593,20 @@ export function TreeView() {
                   selected === n.id ? 'selected' : '',
                   matches(n) ? '' : 'dim',
                 ].join(' ');
+                const td = orientation === 'td';
                 return (
                   <g key={ln.id}>
+                    {ln.name && (
+                      <text
+                        className="branch-name"
+                        x={td ? ln.x + ln.w / 2 : ln.x + 2}
+                        y={ln.y - BOX_H / 2 - 4}
+                        textAnchor={td ? 'middle' : 'start'}
+                      >
+                        <title>{ln.name.full}</title>
+                        {ln.name.shown}
+                      </text>
+                    )}
                     <g
                       className={cls}
                       transform={`translate(${ln.x},${ln.y - BOX_H / 2})`}
@@ -401,7 +623,12 @@ export function TreeView() {
                       {due && <circle cx={ln.w - 1} cy={1} r={4} fill="var(--due)" />}
                     </g>
                     {n.children.length > 0 && (
-                      <g className="toggle" transform={`translate(${ln.x + ln.w + 9},${ln.y})`} style={{ cursor: 'pointer' }} onClick={() => toggle(n.id)}>
+                      <g
+                        className="toggle"
+                        transform={td ? `translate(${ln.x + ln.w / 2},${ln.y + BOX_H / 2 + 9})` : `translate(${ln.x + ln.w + 9},${ln.y})`}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => toggle(n.id)}
+                      >
                         <circle r={7} />
                         <text textAnchor="middle" y={4}>
                           {ln.open ? '−' : '+'}
@@ -475,24 +702,29 @@ export function TreeView() {
   );
 }
 
-function Edges({ root }: { root: LNode }) {
+function Edges({ root, orientation }: { root: LNode; orientation: Orientation }) {
   const paths: React.ReactNode[] = [];
   const walk = (p: LNode) => {
     for (const c of p.children) {
-      const x1 = p.x + p.w + (p.node?.children.length ? 16 : 0);
-      const y1 = p.y;
-      const x2 = c.x;
-      const y2 = c.y;
-      const mx = (x1 + x2) / 2;
+      const toggle = p.node?.children.length ? 16 : 0;
+      let d: string;
+      if (orientation === 'td') {
+        const x1 = p.x + p.w / 2;
+        const y1 = p.y + BOX_H / 2 + toggle;
+        const x2 = c.x + c.w / 2;
+        const y2 = c.y - BOX_H / 2 - (c.name ? NAME_H : 0);
+        const my = (y1 + y2) / 2;
+        d = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
+      } else {
+        const x1 = p.x + p.w + toggle;
+        const y1 = p.y;
+        const x2 = c.x;
+        const y2 = c.y;
+        const mx = (x1 + x2) / 2;
+        d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+      }
       const width = c.share !== undefined ? 1.5 + c.share * 10 : c.ghost ? 1.5 : 2;
-      paths.push(
-        <path
-          key={c.id}
-          className={c.ghost ? 'gap-edge' : 'edge'}
-          d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
-          strokeWidth={width}
-        />,
-      );
+      paths.push(<path key={c.id} className={c.ghost ? 'gap-edge' : 'edge'} d={d} strokeWidth={width} />);
       walk(c);
     }
   };

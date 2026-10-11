@@ -6,6 +6,7 @@ import { getLichessUser, getToken, logout, RATING_BUCKETS, ratingLabel, setToken
 import { isMaiaDownloaded, removeMaia } from '../lib/maia';
 import { stats } from '../lib/repertoire';
 import { playSound, setSoundSet, SOUND_SET_NAMES, SOUND_SETS, soundSet, type SoundSet } from '../lib/sound';
+import { useOpeningNames } from '../lib/openings';
 import { connectDrive, disconnectDrive, driveBackups, loadDriveBackup, reconnectDrive, syncNow, useSync } from '../lib/sync';
 import { useGames } from '../lib/gamesStore';
 import { activeRep, exportBackup, parseBackup, PROFILE_COLORS, profileRating, useApp, type AppData, type Profile } from '../lib/store';
@@ -447,6 +448,8 @@ export function SyncBadge() {
 /** Sound for moves and games: one of the free Lichess sound sets, or none. Per device. */
 function SoundCard() {
   const [set, setSet] = useState<SoundSet>(soundSet);
+  const names = useOpeningNames((s) => s.on);
+  const setNames = useOpeningNames((s) => s.set);
   const choose = (s: SoundSet) => {
     setSet(s);
     setSoundSet(s);
@@ -458,7 +461,7 @@ function SoundCard() {
   return (
     <div className="card">
       <div className="section">
-        <h2>Sound</h2>
+        <h2>Sound and display</h2>
       </div>
       <div className="section stack" style={{ gap: 10 }}>
         <div className="row wrap" style={{ gap: 6 }}>
@@ -478,6 +481,10 @@ function SoundCard() {
           your clock runs low. The sounds were made by Enigmahack for Lichess (AGPL-3.0); Lichess' own default sounds are
           not free to reuse, so they are not here. This choice is kept on this device.
         </div>
+        <label className="row" style={{ gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={names} onChange={(e) => setNames(e.target.checked)} />
+          Show opening names (Tree, Build, training, games)
+        </label>
       </div>
     </div>
   );

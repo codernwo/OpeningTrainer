@@ -955,6 +955,34 @@ cg-container {
   cursor: grabbing;
 }
 
+/* Dragging and pinching are handled by the app (pan, zoom), not by the browser. */
+.tree-scroll {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tree-svg .branch-name {
+  font: 600 10.5px system-ui, sans-serif;
+  fill: var(--accent);
+  cursor: default;
+}
+
+.tree-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.zoom-pct {
+  min-width: 48px;
+  justify-content: center;
+}
+
+.rot90 {
+  transform: rotate(90deg);
+}
+
 .tree-toolbar {
   display: flex;
   gap: 8px;
@@ -2811,4 +2839,13 @@ a.btn {
   font-weight: 650;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.opening-label {
+  display: block;
+  color: var(--accent);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

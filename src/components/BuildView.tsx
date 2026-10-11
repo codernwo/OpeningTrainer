@@ -32,6 +32,7 @@ import { EnginePanel, EvalBar } from './EnginePanel';
 import { ExplorerPanel } from './ExplorerPanel';
 import { Icon } from './Icon';
 import { CheckTourBar } from './CheckTour';
+import { loadOpenings, openingOfLine, useOpeningNames, useOpenings } from '../lib/openings';
 import { ImportPgnDialog } from './ImportPgnDialog';
 
 type Tab = 'lichess' | 'masters' | 'engine';
@@ -90,6 +91,13 @@ export function BuildView() {
   const explorer = useExplorer(key, explorerDb, profile.ratings, profile.speeds, tab !== 'engine');
   const evaluation = useEvaluation(key, engineOn);
 
+  // The opening's name from the list in the app (works without Lichess); the explorer's when names are switched off.
+  const namesOn = useOpeningNames((s) => s.on);
+  const openingsByKey = useOpenings((s) => s.byKey);
+  useEffect(() => {
+    if (namesOn) void loadOpenings();
+  }, [namesOn]);
+  const localOpening = namesOn && openingsByKey && ply > 0 ? openingOfLine(openingsByKey, line.slice(0, ply).map((m) => m.to)) : null;
   useEffect(() => {
     if (ply === 0) setOpening(null);
     else if (explorer.data?.opening) setOpening(`${explorer.data.opening.eco} · ${explorer.data.opening.name}`);
@@ -307,7 +315,7 @@ export function BuildView() {
         <CheckTourBar rep={rep} />
         <div className="card">
           <div className="section pos-head">
-            <span className="opening-name">{opening ?? (ply === 0 ? 'Starting position' : ' ')}</span>
+            <span className="opening-name">{localOpening ? `${localOpening.eco} · ${localOpening.name}` : (opening ?? (ply === 0 ? 'Starting position' : ' '))}</span>
             <span className="spacer" />
             <span className={`badge ${mine ? 'mine' : 'opp'}`}>{mine ? 'Your move' : 'Opponent to move'}</span>
             <div className="row wrap" style={{ flexBasis: '100%', gap: 6 }}>

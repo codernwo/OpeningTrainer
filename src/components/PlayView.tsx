@@ -16,6 +16,7 @@ import { getToken } from '../lib/lichess';
 import { Board } from './Board';
 import { GameReview } from './GameReview';
 import { GameRow } from './GamesView';
+import { OpeningLabel } from './OpeningLabel';
 import { Icon } from './Icon';
 
 interface GameConfig {
@@ -662,6 +663,7 @@ function GameSession({ config, onNew, onRematch }: { config: GameConfig; onNew: 
             <span className="spacer" />
             {inBook && rep && <span className="badge mine">in your repertoire</span>}
           </div>
+          <OpeningLabel keys={history} />
           <div className={`feedback ${result ? 'info' : myTurn ? 'good' : 'info'}`}>{status}</div>
           {notice && (
             <div className="notice small row wrap">

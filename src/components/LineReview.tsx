@@ -10,6 +10,7 @@ import { Board, moveArrow, sideCircle, type Shape } from './Board';
 import { Icon } from './Icon';
 import { SavedNote, saveMessage } from './SaveIndicator';
 import { PositionLinks, useFlash } from './TrainView';
+import { OpeningLabel } from './OpeningLabel';
 
 /**
  * Review in whole lines: you play every one of your moves of a line, from the start (or the branch you train), and
@@ -286,6 +287,7 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
             <span className="badge gap">{score.bad} wrong</span>
           </div>
           <div className="small muted">{formatLine(played) || 'Starting position'}</div>
+          <OpeningLabel keys={(lineFromSans(played) ?? []).map((m) => m.to)} />
           <div className={`feedback ${missed ? 'bad' : 'info'}`}>
             {message ?? (phase === 'await' ? 'Your move.' : 'Opponent is thinking…')}
           </div>

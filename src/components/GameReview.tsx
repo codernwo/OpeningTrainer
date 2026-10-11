@@ -23,6 +23,7 @@ import { positionKeys, prepCheck } from '../lib/insights';
 import { inPlay, movesAt } from '../lib/repertoire';
 import { themesOf } from '../lib/themes';
 import { isGoodToo } from '../lib/checkMove';
+import { OpeningLabel } from './OpeningLabel';
 import { ThemeChips } from './ThemeChips';
 import { Board, moveArrow, type Shape } from './Board';
 import { EvalGraph, EvalGraphLegend } from './EvalGraph';
@@ -213,6 +214,7 @@ export function GameReview({ game }: { game: PlayedGame }) {
             {game.speed ? ` · ${SPEED_NAMES[game.speed]}` : ''}
             {game.opening ? ` · ${game.opening}` : ''} · you played {side}
           </div>
+          {!game.opening && <OpeningLabel keys={keys} />}
         </div>
       </div>
 
