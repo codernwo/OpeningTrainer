@@ -3145,3 +3145,15 @@ details.advanced > summary {
   position: relative;
   z-index: 5;
 }
+
+/* The comment of the card you just found, shown on the next one. */
+.carried {
+  padding: 6px 10px;
+  border-left: 3px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+
+.carried .author-text {
+  margin-top: 2px !important;
+}

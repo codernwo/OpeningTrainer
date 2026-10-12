@@ -392,8 +392,11 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
   const [hinted, setHinted] = useState(false);
   const [message, setMessage] = useState<React.ReactNode>(null);
   const [score, setScore] = useState({ good: 0, bad: 0 });
-  // After a mistake, or when there is a comment or note to read, the session waits for Continue.
+  // After a mistake the session waits for Continue, so you can look at the position.
   const [waiting, setWaiting] = useState(false);
+  // What the author wrote at the card you just found: it goes along to the next card until you answer that one, so
+  // there is time to read it without a stop.
+  const [carried, setCarried] = useState<Words[] | null>(null);
   // Looking back through the line with the arrow keys: the ply shown, or null for the position of the card.
   const [peek, setPeek] = useState<number | null>(null);
   const [flash, triggerFlash] = useFlash();
@@ -513,6 +516,7 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
     playMoveSound(m);
     setPos(m.to);
     setLastMove(uciToArrow(m.uci));
+    setCarried(null);
     if (m.uci !== item.uci && mine.some((x) => x.uci === m.uci)) {
       // Another move of yours: not wrong, but this card asks for its own move, so it stays open.
       setPhase('also');
@@ -547,9 +551,14 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
           <AuthorText words={[w.note, w.mine]} />
         </>,
       );
-      // Time to read: after a mistake, or when the author wrote something here (a new move showed it already).
-      if (mistake || ((w.note || w.mine) && item.kind !== 'learn')) setWaiting(true);
-      else later(next, 700);
+      // Found it: on to the next card, taking the author's words along (a new move showed them already). After a
+      // mistake the session waits.
+      if (mistake) setWaiting(true);
+      else {
+        const words = item.kind === 'learn' ? [] : [w.note, w.mine].filter((x): x is Words => !!x);
+        if (words.length) setCarried(words);
+        later(next, 700);
+      }
     } else {
       triggerFlash('flash-bad');
       setPhase('bad');
@@ -660,6 +669,12 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
               (message ?? (item.kind === 'retry' ? 'Once more: what do you play here?' : 'What do you play here?'))
             )}
           </div>
+          {carried && !peeking && phase !== 'good' && (
+            <div className="carried">
+              <span className="small faint">From the last card</span>
+              <AuthorText words={carried} />
+            </div>
+          )}
           <div className="row">
             {waiting ? (
               <button className="btn primary" onClick={proceed}>
@@ -679,7 +694,8 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
         </div>
         <div className="help">
           A hint (which piece) counts as “hard”, a wrong move as “again”. Another of your moves does not count: each card asks
-          for its own. Cards you got wrong come back at the end of the session.
+          for its own. Cards you got wrong come back at the end of the session. A comment on a move you found stays in view
+          on the next card.
           <span className="desktop-only"> Keys: Space continue, H hint, ← → look back through the line.</span>
         </div>
       </div>

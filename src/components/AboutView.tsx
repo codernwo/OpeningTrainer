@@ -59,8 +59,8 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
           <dt>Train</dt>
           <dd>
             Spaced repetition: every move you play is a card that comes back just before you would forget it, each card
-            asking for its own move. New moves come with the comments around them, and after a mistake or a comment the
-            session waits until you have read it. For a wide repertoire, train up to an early move first and go deeper step by
+            asking for its own move. New moves come with the comments around them; when you find a move the session goes
+            straight on, and its comment stays in view on the next card. For a wide repertoire, train up to an early move first and go deeper step by
             step. Practice lines meet the replies as often as people really play them.
           </dd>
           <dt>Play</dt>
