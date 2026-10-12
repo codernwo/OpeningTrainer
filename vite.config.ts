@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // `base: './'` keeps every asset path relative, so the build works both on
@@ -25,5 +25,7 @@ export default defineConfig({
   ],
   test: {
     environment: 'node',
+    // The browser smoke tests (e2e/) run with Playwright, not here.
+    exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 });

@@ -33,6 +33,18 @@ jobs:
         env:
           # Optional: Settings → Secrets and variables → Actions → Variables → GOOGLE_CLIENT_ID
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      # Smoke tests in a real browser, at desktop and phone width, against the build above: nothing is published when
+      # the main routes break. On failure the report (screenshots, traces) is kept as an artifact of the run.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
       # Skip publishing (instead of failing) while GitHub Pages is not switched on yet.
       - id: pages
         if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event_name != 'pull_request'

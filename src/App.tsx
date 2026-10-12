@@ -288,7 +288,7 @@ function Onboarding() {
     setPeople((ps) => ps.map((x, j) => (j === i ? { ...x, ...patch } : x)));
 
   return (
-    <div style={{ minHeight: '100%', display: 'grid', gridTemplateRows: '1fr auto', padding: 16 }}>
+    <div style={{ minHeight: '100%', display: 'grid', gridTemplateRows: '1fr auto', gridTemplateColumns: 'minmax(0, 1fr)', padding: 16 }}>
       <div className="card card-pad stack" style={{ width: 'min(560px, 100%)', gap: 16, alignSelf: 'center', justifySelf: 'center' }}>
         <div className="row">
           <div className="brand-mark" style={{ width: 40, height: 40, fontSize: 26 }}>
@@ -306,16 +306,16 @@ function Onboarding() {
         {people.map((p, i) => (
           <div key={i} className="field">
             <label>{i === 0 ? 'Your name' : `Player ${i + 1}`}</label>
-            <div className="row">
+            <div className="row wrap">
               <input
                 className="input"
-                style={{ flex: 1 }}
+                style={{ flex: '1 1 160px', minWidth: 0 }}
                 placeholder="Name"
                 value={p.name}
                 autoFocus={i === 0}
                 onChange={(e) => update(i, { name: e.target.value })}
               />
-              <select className="input" value={p.level} onChange={(e) => update(i, { level: Number(e.target.value) })}>
+              <select className="input" style={{ minWidth: 0, maxWidth: '100%' }} value={p.level} onChange={(e) => update(i, { level: Number(e.target.value) })}>
                 {LEVELS.map((l, j) => (
                   <option key={j} value={j}>
                     {l.label}
@@ -335,7 +335,7 @@ function Onboarding() {
             <Icon name="plus" size={14} /> Add another player
           </button>
         </div>
-        <div className="row">
+        <div className="row wrap">
           <span className="help">You can change all of this later in Settings.</span>
           <span className="spacer" />
           <button className="btn primary" onClick={start}>

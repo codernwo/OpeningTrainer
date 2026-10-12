@@ -250,8 +250,9 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
           often, what you forget comes back soon.
         </div>
         <div>
-          New moves are shown first (green arrow) and quizzed again later in the same session. <b>Practice lines</b> plays
-          random lines all the way through and does not affect the schedule. Use <b>Train from here</b> in the tree or on the
+          New moves are shown first (green arrow) and quizzed again later in the same session. Each card asks for its own
+          move: where you have two prepared, the other one does not pass it. <b>Practice lines</b> plays lines all the way
+          through, with the replies as often as people play them, and does not affect the schedule. Use <b>Train from here</b> in the tree or on the
           build board to focus on one branch.
         </div>
         <div>

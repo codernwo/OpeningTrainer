@@ -58,8 +58,10 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
           </dd>
           <dt>Train</dt>
           <dd>
-            Spaced repetition: every move you play is a card that comes back just before you would forget it. For a wide
-            repertoire, train up to an early move first and go deeper step by step.
+            Spaced repetition: every move you play is a card that comes back just before you would forget it, each card
+            asking for its own move. New moves come with the comments around them, and after a mistake or a comment the
+            session waits until you have read it. For a wide repertoire, train up to an early move first and go deeper step by
+            step. Practice lines meet the replies as often as people really play them.
           </dd>
           <dt>Play</dt>
           <dd>
@@ -70,8 +72,9 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
           </dd>
           <dt>Games</dt>
           <dd>
-            The games you played, from Lichess or a PGN file, analysed on your device: where it went wrong, what was better and
-            whether players at your level find it. The mistakes you pick become a deck of their own in Train, and Insights shows
+            The games you played, from Lichess or a PGN file, analysed on your device: where it left your repertoire, where it
+            went wrong and whether players at your level find the better move. You look for it yourself first, with a hint if
+            you want one, before the answer is shown. The mistakes you pick become a deck of their own in Train, and Insights shows
             what all your games say together: your weakest phase, the tactical themes and the clock behind your mistakes, and the
             replies your repertoires in play still lack.
           </dd>
