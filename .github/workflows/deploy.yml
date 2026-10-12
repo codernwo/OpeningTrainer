@@ -16,7 +16,8 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pinned: the browser for the smoke tests (Playwright 1.56) installs its system libraries for this Ubuntu release.
+    runs-on: ubuntu-24.04
     outputs:
       pages: ${{ steps.pages.outputs.enabled }}
     steps:
