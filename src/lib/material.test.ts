@@ -1,24 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { lineFromSans, START_KEY } from './chess';
-import { capturedBy, materialBalance } from './material';
+import { materialBalance, materialDiff } from './material';
 
-const line = (s: string) => lineFromSans(s.split(' '))!;
+const end = (s: string) => lineFromSans(s.split(' '))!.at(-1)!.to;
 
-describe('captured pieces', () => {
-  it('collects what each side took, cheapest first', () => {
-    const l = line('e4 d5 exd5 Qxd5 Nc3 Qxg2 Bxg2');
-    expect(capturedBy(l)).toEqual({ white: ['pawn', 'queen'], black: ['pawn', 'pawn'] });
-    expect(materialBalance(l.at(-1)!.to)).toBe(8); // queen and pawn against two pawns
+describe('material difference (as on Lichess)', () => {
+  it('only what one side is up: trades cancel out, biggest first', () => {
+    // White took a pawn and the queen; Black two pawns: net, White is a queen up and Black a pawn.
+    const d = materialDiff(end('e4 d5 exd5 Qxd5 Nc3 Qxg2 Bxg2'));
+    expect(d).toEqual({ white: ['queen'], black: ['pawn'], score: 8 });
+    expect(materialDiff(end('e4 d5 exd5 Qxd5 Nc3 Qxd2+ Bxd2'))).toEqual({ white: ['queen'], black: ['pawn'], score: 8 });
   });
 
-  it('counts en passant, not castling, and a promotion shows in the balance', () => {
-    const ep = line('e4 a6 e5 d5 exd6');
-    expect(capturedBy(ep).white).toEqual(['pawn']);
-    const castle = line('e4 e5 Nf3 Nc6 Bc4 Bc5 O-O');
-    expect(capturedBy(castle)).toEqual({ white: [], black: [] });
-    const promo = line('h4 g5 hxg5 h6 gxh6 Nf6 h7 Ng8 hxg8=Q');
-    expect(capturedBy(promo).white).toEqual(['pawn', 'pawn', 'knight']);
-    expect(materialBalance(promo.at(-1)!.to)).toBe(3 + 2 + 8); // knight and two pawns taken, a pawn became a queen
-    expect(materialBalance(START_KEY)).toBe(0);
+  it('equal trades show nothing', () => {
+    // Each side lost a knight and a pawn: nothing to show.
+    expect(materialDiff(end('e4 e5 Nf3 Nc6 Nxe5 Nxe5 d4 Nc6 d5 Nb4 c3 Nxd5 exd5'))).toEqual({ white: [], black: [], score: 0 });
+    // Pawns and knights traded one each, White also took the bishop: only the bishop shows (+3).
+    expect(materialDiff(end('e4 d5 exd5 Qxd5 Nc3 Qa5 Nf3 Nf6 Bc4 Bg4 O-O e6 d4 Bxf3 Qxf3 Qb6 Qxf6'))).toEqual({ white: ['bishop'], black: [], score: 3 });
+    expect(materialDiff(START_KEY)).toEqual({ white: [], black: [], score: 0 });
+  });
+
+  it('promotions count (a queen up, a pawn down) and en passant is a pawn', () => {
+    const promo = end('h4 g5 hxg5 h6 gxh6 Nf6 h7 Ng8 hxg8=Q');
+    expect(materialDiff(promo)).toEqual({ white: ['queen', 'knight', 'pawn'], black: [], score: 9 + 3 + 1 });
+    expect(materialBalance(promo)).toBe(13);
+    expect(materialDiff(end('e4 a6 e5 d5 exd6')).white).toEqual(['pawn']);
   });
 });

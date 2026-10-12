@@ -7,7 +7,7 @@ import { positionKeys, prepCheck } from '../lib/insights';
 import { CATEGORY_NAMES, categoryOf, RATING_CATEGORIES, runsOf, showRating, stakes, type CategoryRating, type RatingCategory, type RatingRun, type Ratings } from '../lib/rating';
 import { useAnalysisQueue } from '../lib/analyzer';
 import { playMoveSound, playSound } from '../lib/sound';
-import { capturedBy, materialBalance, type Captured } from '../lib/material';
+import { materialDiff, type Captured } from '../lib/material';
 import { createElement } from 'react';
 import { loadMaia, MAIA_DOWNLOAD_MB, MAIA_MAX, MAIA_MIN, isMaiaDownloaded, useMaia } from '../lib/maia';
 import { chooseOpponentMove, type MoveSource, type OpponentSettings } from '../lib/opponent';
@@ -834,14 +834,16 @@ function ClockFace({ ms, running, low, label }: { ms: number; running: boolean; 
 
 const LOW_TIME = 10_000;
 
-/** The pieces one side has taken (drawn like the board's pieces, in the colour of their owner), and its material
- *  advantage when it has one. */
+/** As on Lichess: the opponent's pieces one side is up (drawn like the board's pieces, in the colour of their owner),
+ *  and its material advantage; the number always stays in view. */
 function CapturedPieces({ pieces, color, plus }: { pieces: Captured[]; color: Side; plus: number }) {
   return (
-    <span className="captured cg-wrap" title={pieces.length ? `Captured: ${pieces.join(', ')}` : undefined}>
-      {pieces.map((role, i) =>
-        createElement('piece', { key: i, className: `${role} ${color}${i > 0 && pieces[i - 1] !== role ? ' gap' : ''}` }),
-      )}
+    <span className="material" title={pieces.length ? `Up in material: ${pieces.join(', ')}` : undefined}>
+      <span className="captured cg-wrap">
+        {pieces.map((role, i) =>
+          createElement('piece', { key: i, className: `${role} ${color}${i > 0 && pieces[i - 1] !== role ? ' gap' : ''}` }),
+        )}
+      </span>
       {plus > 0 && <span className="material-plus">+{plus}</span>}
     </span>
   );
@@ -1160,8 +1162,9 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
         label={label}
       />
     );
-  const taken = useMemo(() => capturedBy(moves), [moves]);
-  const balance = useMemo(() => materialBalance(key), [key]);
+  const material = useMemo(() => materialDiff(key), [key]);
+  const taken = { white: material.white, black: material.black };
+  const balance = material.score;
   const ahead = (side: Side) => (side === 'white' ? balance : -balance);
 
   return (
@@ -1321,7 +1324,8 @@ function MoveList({ moves, sources }: { moves: PlayedMove[]; sources: Source[] }
   return (
     <div ref={box} style={{ maxHeight: 220, overflow: 'auto', lineHeight: 2 }}>
       {moves.map((m, i) => (
-        <span key={i} style={{ marginRight: 6, whiteSpace: 'nowrap', opacity: sources[i] === 'start' ? 0.6 : 1 }}>
+        // inline-block: the list wraps between moves (nowrap spans without spaces would make one endless line).
+        <span key={i} style={{ display: 'inline-block', marginRight: 6, whiteSpace: 'nowrap', opacity: sources[i] === 'start' ? 0.6 : 1 }}>
           {i % 2 === 0 && <span className="faint">{i / 2 + 1}. </span>}
           <b>{m.san}</b> {tag(sources[i])}
         </span>
