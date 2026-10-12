@@ -62,6 +62,22 @@ export const THEME_ADVICE: Record<Theme, string> = {
   threat: 'Before each move, ask: what does my opponent want to do now?',
 };
 
+/** A hint that points at the idea without giving the move (for finding a better move yourself). */
+export const THEME_HINT: Record<Theme, string> = {
+  'missed-mate': 'There is a mate here.',
+  'allowed-mate': 'Your move allowed a mate: look at the checks your opponent gets.',
+  'missed-fork': 'Look for a fork: one piece attacking two.',
+  'allowed-fork': 'Your move allowed a fork: where could an enemy piece attack two of yours?',
+  'missed-pin': 'Look for a pin.',
+  'allowed-pin': 'Your move allowed a pin.',
+  hanging: 'Your move left a piece hanging.',
+  'lost-material': 'Your move lost material: what can your opponent take after it?',
+  'missed-material': 'You can win material here.',
+  sacrifice: 'Giving up material works here.',
+  promotion: 'Think about promoting a pawn.',
+  threat: 'Your opponent threatens something. What?',
+};
+
 const VALUE: Record<Role, number> = { pawn: 1, knight: 3, bishop: 3, rook: 5, queen: 9, king: 0 };
 
 function material(pos: Chess, side: Side): number {

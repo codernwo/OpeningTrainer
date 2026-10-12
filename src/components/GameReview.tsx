@@ -24,11 +24,11 @@ import { positionKeys, prepCheck } from '../lib/insights';
 import { movesAt } from '../lib/repertoire';
 import { scopedReps, useScopeOf } from '../lib/repScope';
 import { RepScopePicker } from './RepScopePicker';
-import { themesOf } from '../lib/themes';
+import { THEME_HINT, themesOf } from '../lib/themes';
 import { isGoodToo } from '../lib/checkMove';
 import { OpeningLabel } from './OpeningLabel';
 import { ThemeChips } from './ThemeChips';
-import { Board, moveArrow, type Shape } from './Board';
+import { Board, moveArrow, sideCircle, type Shape } from './Board';
 import { EvalGraph, EvalGraphLegend } from './EvalGraph';
 import { Icon } from './Icon';
 import { RatingDiff } from './RatingDiff';
@@ -38,6 +38,8 @@ interface Retry {
   board: string;
   lastMove: [string, string] | null;
   state: 'try' | 'checking' | 'wrong' | 'solved' | 'revealed';
+  /** Hints taken: 1 the piece, 2 the idea. */
+  hints: number;
   tried?: string;
   /** Not one of the stored good moves, but the engine rates it as good. */
   goodToo?: boolean;
@@ -69,8 +71,14 @@ export function GameReview({ game }: { game: PlayedGame }) {
 
   const [pos, setPos] = useState(() => game.analysis?.moments?.[0]?.ply ?? 0);
   const [orientation, setOrientation] = useState<Side>(side);
+  // On a phone the graph starts folded, so the task sits right under the board.
+  const [graphOpen, setGraphOpen] = useState(() => typeof matchMedia === 'undefined' || !matchMedia('(max-width: 900px)').matches);
   const [retry, setRetry] = useState<Retry | null>(null);
+  // The moments whose answer you have seen (found it, or asked for it). The others open without it: first try yourself.
+  const [shown, setShown] = useState<ReadonlySet<number>>(() => new Set());
+  const show = (ply: number) => setShown((s) => (s.has(ply) ? s : new Set([...s, ply])));
   const moment = moments.find((m) => m.ply === pos);
+  const open = !!moment && shown.has(moment.ply);
   const cardIds = useMemo(() => new Set((mistakes ?? []).map((m) => m.id)), [mistakes]);
   const rating = a?.maiaRating ?? profile?.rating;
 
@@ -81,7 +89,13 @@ export function GameReview({ game }: { game: PlayedGame }) {
 
   useKey(
     (e) => {
-      if (retry) return;
+      if (retry) {
+        if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey) {
+          takeHint();
+          e.preventDefault();
+        }
+        return;
+      }
       if (e.key === 'ArrowLeft') go(pos - 1);
       else if (e.key === 'ArrowRight') go(pos + 1);
       else if (e.key === 'Home') go(0);
@@ -91,6 +105,8 @@ export function GameReview({ game }: { game: PlayedGame }) {
     },
     [pos, n, retry],
   );
+
+  const takeHint = () => setRetry((r) => (r && (r.state === 'try' || r.state === 'wrong') ? { ...r, hints: Math.min(2, r.hints + 1) } : r));
 
   // Arrived at a new game, or the analysis came in: start at the first moment.
   useEffect(() => {
@@ -108,14 +124,16 @@ export function GameReview({ game }: { game: PlayedGame }) {
     lastMove = retry.lastMove;
     const best = bestUci(retry.moment);
     if ((retry.state === 'solved' || retry.state === 'revealed') && best) shapes = [engineArrow(best)];
+    else if (retry.hints && best && boardKey === keys[retry.moment.ply]) shapes = [sideCircle(uciToArrow(best)[0], side)];
   } else if (moment) {
-    const best = bestUci(moment);
+    // Your move; the engine's only once you have seen the answer.
+    const best = open ? bestUci(moment) : null;
     shapes = [moveArrow(line[pos].uci, side, { soft: true }), ...(best ? [engineArrow(best)] : [])];
   }
 
   const startRetry = (m: KeyMoment) => {
     setPos(m.ply);
-    setRetry({ moment: m, board: keys[m.ply], lastMove: m.ply > 0 ? uciToArrow(line[m.ply - 1].uci) : null, state: 'try' });
+    setRetry({ moment: m, board: keys[m.ply], lastMove: m.ply > 0 ? uciToArrow(line[m.ply - 1].uci) : null, state: 'try', hints: 0 });
   };
 
   const onMove = (orig: string, dest: string) => {
@@ -128,7 +146,10 @@ export function GameReview({ game }: { game: PlayedGame }) {
         900,
       );
     const base = { ...retry, board: m.to, lastMove: uciToArrow(m.uci), tried: m.san, goodToo: false };
-    if (retry.moment.best.includes(m.san)) return setRetry({ ...base, state: 'solved' });
+    if (retry.moment.best.includes(m.san)) {
+      show(retry.moment.ply);
+      return setRetry({ ...base, state: 'solved' });
+    }
     if (m.san === line[retry.moment.ply].san) {
       setRetry({ ...base, state: 'wrong' });
       return back();
@@ -138,7 +159,8 @@ export function GameReview({ game }: { game: PlayedGame }) {
     isGoodToo(m.to, side, retry.moment.bestEval)
       .then((r) => {
         setRetry((cur) => (cur && cur.state === 'checking' && cur.tried === m.san ? { ...cur, state: r?.good ? 'solved' : 'wrong', goodToo: !!r?.good } : cur));
-        if (!r?.good) back();
+        if (r?.good) show(retry.moment.ply);
+        else back();
       })
       .catch(() => {
         setRetry((cur) => (cur && cur.state === 'checking' ? { ...cur, state: 'wrong' } : cur));
@@ -183,6 +205,31 @@ export function GameReview({ game }: { game: PlayedGame }) {
     if (ratingStep && c === game.myColor) return ` (${showRating({ rating: ratingStep.before, provisional: ratingStep.provisionalBefore })})`;
     const e = c === 'white' ? game.whiteElo : game.blackElo;
     return e ? ` (${e})` : '';
+  };
+
+  const clockLine = (m: KeyMoment) => {
+    const t = game.speed !== 'correspondence' ? moveTime(game, m.ply) : null;
+    return t ? (
+      <div className="small muted">
+        You took {formatClock(t.spent)} for this move, with {formatClock(t.left)} left on your clock.
+      </div>
+    ) : null;
+  };
+  const momentNav = (m: KeyMoment) => (
+    <div className="row">
+      <button className="btn sm ghost" disabled={moments.indexOf(m) === 0} onClick={() => go(moments[moments.indexOf(m) - 1].ply)}>
+        <Icon name="prev" size={14} /> Previous moment
+      </button>
+      <span className="spacer" />
+      <button className="btn sm ghost" disabled={moments.indexOf(m) === moments.length - 1} onClick={() => go(moments[moments.indexOf(m) + 1].ply)}>
+        Next moment <Icon name="next" size={14} />
+      </button>
+    </div>
+  );
+  // The second hint: the idea (a theme of the mistake), else how good the best move is.
+  const ideaHint = (m: KeyMoment) => {
+    const themes = themesOf({ key: keys[m.ply], side, played: line[m.ply].san, line: m.line, reply: m.reply, threat: m.threat, bestEval: m.bestEval });
+    return themes.length ? THEME_HINT[themes[0]] : `With the best move the position is ${formatEval(m.bestEval)}.`;
   };
 
   const opp = opponentOf(game);
@@ -239,6 +286,7 @@ export function GameReview({ game }: { game: PlayedGame }) {
           )}
           {!game.opening && <OpeningLabel keys={keys} />}
         </div>
+        <OpeningCheck game={game} />
       </div>
 
       <div className="review-board stack">
@@ -270,10 +318,11 @@ export function GameReview({ game }: { game: PlayedGame }) {
           </button>
         </div>
         {a && (
-          <>
+          <details className="graph-fold" open={graphOpen} onToggle={(e) => setGraphOpen((e.target as HTMLDetailsElement).open)}>
+            <summary className="small muted">Evaluation graph</summary>
             <EvalGraph evals={a.evals} current={pos} moves={game.moves} moments={moments} phases={phases} onSelect={go} />
             <EvalGraphLegend />
-          </>
+          </details>
         )}
       </div>
 
@@ -305,8 +354,11 @@ export function GameReview({ game }: { game: PlayedGame }) {
           <RetryPanel
             retry={retry}
             played={line[retry.moment.ply].san}
+            idea={ideaHint(retry.moment)}
+            onHint={takeHint}
             onReveal={() => {
               const best = playSan(keys[retry.moment.ply], retry.moment.best[0]);
+              show(retry.moment.ply);
               setRetry({ ...retry, state: 'revealed', board: best?.to ?? retry.board, lastMove: best ? uciToArrow(best.uci) : retry.lastMove });
             }}
             onAgain={() => startRetry(retry.moment)}
@@ -315,6 +367,37 @@ export function GameReview({ game }: { game: PlayedGame }) {
             carded={cardIds.has(mistakeId(game.profileId, keys[retry.moment.ply]))}
             onCard={() => toggleCard(retry.moment)}
           />
+        ) : moment && !open ? (
+          <div className="card card-pad stack moment-card">
+            <div className="row wrap">
+              <b className="moment-move">
+                {moveNo(moment.ply)}
+                {line[moment.ply].san}
+              </b>
+              <span className={`badge kind-${moment.kind}`}>{JUDGMENT_NAMES[moment.kind]}</span>
+              <span className="muted small num">
+                {formatEval(moment.bestEval)} → {formatEval(moment.playedEval)}
+              </span>
+              <span className="spacer" />
+              <span className="small faint">
+                {moments.indexOf(moment) + 1} of {moments.length}
+              </span>
+            </div>
+            <div>
+              You played {moveNo(moment.ply)}
+              {line[moment.ply].san} here. There was a better move: can you find it?
+            </div>
+            {clockLine(moment)}
+            <div className="row wrap">
+              <button className="btn primary" onClick={() => startRetry(moment)}>
+                <Icon name="target" size={16} /> Find a better move
+              </button>
+              <button className="btn" onClick={() => show(moment.ply)}>
+                <Icon name="eye" size={16} /> Show the answer
+              </button>
+            </div>
+            {momentNav(moment)}
+          </div>
         ) : moment ? (
           <div className="card card-pad stack moment-card">
             <div className="row wrap">
@@ -339,17 +422,13 @@ export function GameReview({ game }: { game: PlayedGame }) {
                 {t}
               </div>
             ))}
-            {game.speed !== 'correspondence' && moveTime(game, moment.ply) && (
-              <div className="small muted">
-                You took {formatClock(moveTime(game, moment.ply)!.spent)} for this move, with {formatClock(moveTime(game, moment.ply)!.left)} left on your clock.
-              </div>
-            )}
+            {clockLine(moment)}
             <div className="small muted">
               Board: <span className="key-white">white/black arrow</span> what you played, <span className="key-engine">violet</span> the engine’s move.
             </div>
             <div className="row wrap">
-              <button className="btn primary" onClick={() => startRetry(moment)}>
-                <Icon name="target" size={16} /> Find a better move
+              <button className="btn" onClick={() => startRetry(moment)}>
+                <Icon name="target" size={16} /> Try it yourself
               </button>
               <button className={`btn ${cardIds.has(mistakeId(game.profileId, keys[moment.ply])) ? 'mine' : ''}`} onClick={() => toggleCard(moment)}>
                 <Icon name={cardIds.has(mistakeId(game.profileId, keys[moment.ply])) ? 'check' : 'plus'} size={16} />{' '}
@@ -372,15 +451,7 @@ export function GameReview({ game }: { game: PlayedGame }) {
                 <Icon name="external" size={14} /> Analyse on Lichess
               </a>
             </div>
-            <div className="row">
-              <button className="btn sm ghost" disabled={moments.indexOf(moment) === 0} onClick={() => go(moments[moments.indexOf(moment) - 1].ply)}>
-                <Icon name="prev" size={14} /> Previous moment
-              </button>
-              <span className="spacer" />
-              <button className="btn sm ghost" disabled={moments.indexOf(moment) === moments.length - 1} onClick={() => go(moments[moments.indexOf(moment) + 1].ply)}>
-                Next moment <Icon name="next" size={14} />
-              </button>
-            </div>
+            {momentNav(moment)}
           </div>
         ) : (
           <PositionCard
@@ -398,11 +469,14 @@ export function GameReview({ game }: { game: PlayedGame }) {
           />
         )}
 
-        <OpeningCheck game={game} />
-
         {a && mine && theirs && (
-          <div className="card card-pad stack" style={{ gap: 8 }}>
-            <h3>Accuracy</h3>
+          <details className="card card-pad stack acc-fold" style={{ gap: 8 }}>
+            <summary>
+              <b>Accuracy</b>{' '}
+              <span className="muted small">
+                you {pctOf(mine.accuracy)} · {opp.name} {pctOf(theirs.accuracy)}
+              </span>
+            </summary>
             <table className="acc-table">
               <thead>
                 <tr>
@@ -454,7 +528,7 @@ export function GameReview({ game }: { game: PlayedGame }) {
               Lichess’ method: how much of your winning chances each move kept, weighted towards sharp positions. Analysed {a.from === 'lichess' ? 'by Lichess, checked here' : 'on this device'}
               {a.maiaRating ? `; learnability by Maia at ${a.maiaRating}` : ''}.
             </div>
-          </div>
+          </details>
         )}
 
         <div className="card card-pad">
@@ -488,10 +562,10 @@ function OpeningCheck({ game }: { game: PlayedGame }) {
   const picker = <RepScopePicker profileId={game.profileId} side={game.myColor} />;
   if (!reps.length || check.kind === 'none')
     return (
-      <div className="card card-pad stack" style={{ gap: 6 }}>
-        <h3>Your repertoire</h3>
-        <div className="small muted">
-          {reps.length ? 'This game did not start in this preparation.' : `No repertoire with ${game.myColor} in play.`}
+      <div className="opening-verdict stack">
+        <div className="small">
+          <b>Repertoire:</b>{' '}
+          <span className="muted">{reps.length ? 'this game did not start in this preparation.' : `no repertoire with ${game.myColor} in play.`}</span>
         </div>
         {picker}
       </div>
@@ -536,11 +610,14 @@ function OpeningCheck({ game }: { game: PlayedGame }) {
     action = build(check.ply, 'Extend in Build', check.ply - 1);
   }
   return (
-    <div className="card card-pad stack" style={{ gap: 6 }}>
-      <h3>Your repertoire{reps.length === 1 ? `: ${reps[0].name}` : ''}</h3>
-      <div className="small">{text}</div>
-      {action && <div>{action}</div>}
-      {picker}
+    <div className="opening-verdict stack">
+      <div className="small">
+        <b>Repertoire{reps.length === 1 ? ` (${reps[0].name})` : ''}:</b> {text}
+      </div>
+      <div className="row wrap" style={{ gap: 8 }}>
+        {action}
+        {picker}
+      </div>
     </div>
   );
 }
@@ -621,6 +698,8 @@ function PositionCard({
 function RetryPanel({
   retry,
   played,
+  idea,
+  onHint,
   onReveal,
   onAgain,
   onStop,
@@ -630,6 +709,8 @@ function RetryPanel({
 }: {
   retry: Retry;
   played: string;
+  idea: string;
+  onHint: () => void;
   onReveal: () => void;
   onAgain: () => void;
   onStop: () => void;
@@ -663,6 +744,18 @@ function RetryPanel({
   return (
     <div className="card card-pad stack">
       <div className={`feedback ${cls}`}>{feedback}</div>
+      {!finished && retry.hints > 0 && (
+        <div className="small stack" style={{ gap: 2 }}>
+          <div>
+            <span className="muted">Hint:</span> the piece to move is circled.
+          </div>
+          {retry.hints > 1 && (
+            <div>
+              <span className="muted">Hint:</span> {idea}
+            </div>
+          )}
+        </div>
+      )}
       {finished && (
         <div className="small">
           <span className="muted">Engine line: </span>
@@ -672,9 +765,14 @@ function RetryPanel({
       {finished && m.threat && <div className="small muted">The opponent threatened {m.threat[0]}.</div>}
       <div className="row wrap">
         {!finished && (
-          <button className="btn" onClick={onReveal}>
-            <Icon name="hint" size={16} /> Show the move
-          </button>
+          <>
+            <button className="btn" onClick={onHint} disabled={retry.hints >= 2 || retry.state === 'checking'} title="First the piece to move, then the idea">
+              <Icon name="hint" size={16} /> {retry.hints ? 'Another hint' : 'Hint'}
+            </button>
+            <button className="btn ghost" onClick={onReveal}>
+              <Icon name="eye" size={16} /> Show the move
+            </button>
+          </>
         )}
         {finished && (
           <>

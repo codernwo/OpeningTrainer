@@ -3005,3 +3005,30 @@ button.rating-tile:disabled {
     display: none !important;
   }
 }
+
+/* Game review: the repertoire verdict under the title; the graph and the accuracy table fold away. */
+.opening-verdict {
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.graph-fold > summary {
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+@media (min-width: 901px) {
+  .graph-fold[open] > summary {
+    display: none;
+  }
+}
+
+.acc-fold > summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.acc-fold[open] > summary {
+  margin-bottom: 8px;
+}
