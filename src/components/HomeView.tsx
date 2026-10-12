@@ -9,6 +9,7 @@ import { useSync } from '../lib/sync';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { ImportPgnDialog } from './ImportPgnDialog';
+import { Menu } from './Menu';
 
 /** In play (you play it now: your games are checked against it) or study (trained, but not checked against your games). */
 function PlayToggle({ rep }: { rep: Repertoire }) {
@@ -196,32 +197,14 @@ export function HomeView() {
                   )}
                 </div>
               </div>
-              <div className="row" style={{ gap: 2 }} onClick={(e) => e.stopPropagation()}>
-                <button
-                  className="btn sm icon ghost"
-                  title="Download as PGN"
-                  aria-label={`Download ${rep.name} as PGN`}
-                  onClick={() => downloadRepertoire(rep)}
-                >
-                  <Icon name="download" size={15} />
-                </button>
-                <button
-                  className="btn sm icon ghost"
-                  title="Add lines from a PGN (paste or file)"
-                  aria-label={`Add lines to ${rep.name} from a PGN`}
-                  onClick={() => setImportingId(rep.id)}
-                >
-                  <Icon name="upload" size={15} />
-                </button>
-                <button
-                  className="btn sm icon ghost danger"
-                  title="Delete repertoire"
-                  aria-label={`Delete ${rep.name}`}
-                  onClick={() => setDeleting(rep)}
-                >
-                  <Icon name="trash" size={15} />
-                </button>
-              </div>
+              <Menu
+                label={`More for ${rep.name}`}
+                items={[
+                  { label: 'Download as PGN', icon: 'download', onClick: () => downloadRepertoire(rep) },
+                  { label: 'Add lines from a PGN…', icon: 'upload', onClick: () => setImportingId(rep.id) },
+                  { label: 'Delete…', icon: 'trash', danger: true, onClick: () => setDeleting(rep) },
+                ]}
+              />
             </div>
             <div className="stat-row">
               <div
@@ -278,14 +261,6 @@ export function HomeView() {
           </div>
         )}
       </div>
-
-      {summaries.length > 0 && (
-        <div className="help">
-          Sizes are counted the way books and PGN do: <b>one move is White’s move plus Black’s reply</b> (1.e4 e5 is one
-          move), so a line of 20 half-moves is 10 moves. Hover a number to see the half-moves. <b>Lines</b> are distinct
-          variations; <b>due</b> and <b>new</b> count your own moves, which are what you train.
-        </div>
-      )}
 
       {creating && <NewRepertoireDialog onClose={() => setCreating(false)} />}
       {deleting && <DeleteRepertoireDialog rep={deleting} onClose={() => setDeleting(null)} />}

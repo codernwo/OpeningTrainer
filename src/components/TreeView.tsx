@@ -398,6 +398,18 @@ export function TreeView() {
       pendingScroll.current = null;
     }
   }, [zoom]);
+  // Open with the starting position in view: in a wide tree it would otherwise sit outside the window (above it
+  // left to right, beside it top-down). Once per repertoire and orientation, so it never jumps while you work.
+  const rootShown = useRef('');
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const id = `${rep.id}|${orientation}`;
+    if (!el || rootShown.current === id || !tree.length) return;
+    rootShown.current = id;
+    const r = layout.root;
+    el.scrollLeft = Math.max(0, (r.x + r.w / 2) * zoomRef.current - el.clientWidth / 2);
+    el.scrollTop = Math.max(0, r.y * zoomRef.current - el.clientHeight / 2);
+  });
   const fit = () => {
     const el = scroller.current;
     if (!el) return;
@@ -687,8 +699,11 @@ export function TreeView() {
               <NodeDetails rep={rep} node={selectedNode} profile={profile} onOpen={() => goToKey(selectedNode.to)} onPrune={() => askPrune(selectedNode)} />
             ) : (
               <div className="help">
-                Click a move to select it; double-click to open it on the build board. Hover over the tree to preview positions.
-                Prune the selected branch with <span className="kbd">Delete</span>.
+                <span className="desktop-only">
+                  Click a move to select it; double-click to open it on the build board. Hover over the tree to preview positions.
+                  Prune the selected branch with <span className="kbd">Delete</span>.
+                </span>
+                <span className="touch-only">Tap a move to see its position, with what you can do there.</span>
               </div>
             )}
           </div>

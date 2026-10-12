@@ -335,22 +335,38 @@ export function AuditView() {
             Stockfish 19 runs in your browser. Moves clearly worse than the best move are marked (?!, ?, ??) — in the tree
             too.
           </div>
-          <div className="row wrap">
-            <span className="muted small">Flag from</span>
-            {[30, 50, 100].map((v) => (
-              <span key={v} className={`chip ${engOpts.threshold === v ? 'on' : ''}`} onClick={() => setEngOpts((o) => ({ ...o, threshold: v }))}>
-                {(v / 100).toFixed(1)} pawn
-              </span>
-            ))}
-          </div>
-          <div className="row wrap">
-            <span className="muted small">Local depth</span>
-            {[12, 16, 20].map((v) => (
-              <span key={v} className={`chip ${engOpts.localDepth === v ? 'on' : ''}`} onClick={() => setEngOpts((o) => ({ ...o, localDepth: v }))}>
-                {v}
-              </span>
-            ))}
-          </div>
+          <details className="advanced">
+            <summary className="small muted">
+              Advanced · flag from {(engOpts.threshold / 100).toFixed(1)} pawn, depth {engOpts.localDepth}
+            </summary>
+            <div className="stack" style={{ gap: 8, marginTop: 8 }}>
+              <div className="row wrap">
+                <span className="muted small">Flag from</span>
+                {[30, 50, 100].map((v) => (
+                  <span key={v} className={`chip ${engOpts.threshold === v ? 'on' : ''}`} onClick={() => setEngOpts((o) => ({ ...o, threshold: v }))}>
+                    {(v / 100).toFixed(1)} pawn
+                  </span>
+                ))}
+              </div>
+              <div className="row wrap">
+                <span className="muted small">Local depth</span>
+                {[12, 16, 20].map((v) => (
+                  <span key={v} className={`chip ${engOpts.localDepth === v ? 'on' : ''}`} onClick={() => setEngOpts((o) => ({ ...o, localDepth: v }))}>
+                    {v}
+                  </span>
+                ))}
+              </div>
+              {issues && (
+                <label className="row small muted" style={{ gap: 4, cursor: 'pointer' }} title="Also evaluate the moves that were evaluated before">
+                  <input type="checkbox" checked={evaluateAll} onChange={(e) => setEvaluateAll(e.target.checked)} /> Evaluate every move again
+                </label>
+              )}
+              <div className="help">
+                The defaults suit most repertoires: 0.5 pawn catches real inaccuracies without flagging matters of taste, and
+                depth 16 is quick and reliable in the opening.
+              </div>
+            </div>
+          </details>
           <div className="row">
             {engRun ? (
               <>
@@ -366,11 +382,6 @@ export function AuditView() {
                 <button className={`btn ${!issues || engChange || engSettings ? 'primary' : ''}`} onClick={runEngine}>
                   {issues ? 'Check again' : 'Check my moves'}
                 </button>
-                {issues && (
-                  <label className="row small muted" style={{ gap: 4, cursor: 'pointer' }} title="Also evaluate the moves that were evaluated before">
-                    <input type="checkbox" checked={evaluateAll} onChange={(e) => setEvaluateAll(e.target.checked)} /> evaluate all again
-                  </label>
-                )}
               </>
             )}
           </div>

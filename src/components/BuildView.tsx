@@ -431,13 +431,15 @@ export function BuildView() {
           </div>
         </div>
         <div className="help">
-          <span className="kbd">←</span> <span className="kbd">→</span> move through the line · <span className="kbd">Enter</span> save ·{' '}
-          <span className="kbd">Esc</span> discard · <span className="kbd">f</span> flip board · <span className="kbd">Ctrl</span>+
-          <span className="kbd">Z</span> undo
-          <br />
-          Draw on the board like on Lichess: right-click and drag for an arrow, right-click a square for a circle (with{' '}
-          <span className="kbd">Shift</span> red, <span className="kbd">Alt</span> blue). They are saved with the position.
-          <br />
+          <span className="desktop-only">
+            <span className="kbd">←</span> <span className="kbd">→</span> move through the line · <span className="kbd">Enter</span> save ·{' '}
+            <span className="kbd">Esc</span> discard · <span className="kbd">f</span> flip board · <span className="kbd">Ctrl</span>+
+            <span className="kbd">Z</span> undo
+            <br />
+            Draw on the board like on Lichess: right-click and drag for an arrow, right-click a square for a circle (with{' '}
+            <span className="kbd">Shift</span> red, <span className="kbd">Alt</span> blue). They are saved with the position.
+            <br />
+          </span>
           The app's own arrows: your prepared moves in white or black, and <span className="gap-key" /> gaps in orange-red —
           replies played in {Math.round(GAP_SHARE * 100)}% or more of the database games that you have not prepared (thicker
           = played more often).

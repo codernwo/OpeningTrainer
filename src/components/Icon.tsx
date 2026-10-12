@@ -39,6 +39,7 @@ const PATHS = {
   external: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
   games: 'M3 3v18h18M7 15l4-5 3 3 6-7',
   grip: 'M5 9h14M5 15h14',
+  more: 'M4.8 12a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0M10.8 12a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0M16.8 12a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0',
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -2999,10 +2999,67 @@ button.rating-tile:disabled {
   }
 }
 
-/* Keyboard, right-click and hover tips mean nothing on a touch screen. */
+/* Keyboard, right-click and hover tips mean nothing on a touch screen; a few tips are for touch only. */
+.touch-only {
+  display: none;
+}
+
 @media (hover: none) and (pointer: coarse) {
   .desktop-only {
     display: none !important;
+  }
+  .touch-only {
+    display: revert;
+  }
+}
+
+/* Fingers need bigger targets than a mouse: about 40 px or more, the small controls with a larger invisible edge. */
+@media (pointer: coarse) {
+  .btn {
+    height: 40px;
+  }
+  .btn.icon {
+    width: 40px;
+  }
+  .btn.sm {
+    height: 36px;
+    padding: 0 10px;
+  }
+  .btn.sm.icon {
+    width: 36px;
+  }
+  .chip {
+    height: 34px;
+    padding: 0 12px;
+  }
+  .nav button,
+  .input,
+  select.input {
+    height: 40px;
+  }
+  .tabs button,
+  .deck-tabs button {
+    min-height: 40px;
+  }
+  .play-toggle {
+    line-height: 26px;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 20px;
+    height: 20px;
+  }
+  .btn.sm,
+  .chip,
+  .play-toggle {
+    position: relative;
+  }
+  .btn.sm::after,
+  .chip::after,
+  .play-toggle::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
   }
 }
 
@@ -3031,4 +3088,60 @@ button.rating-tile:disabled {
 
 .acc-fold[open] > summary {
   margin-bottom: 8px;
+}
+
+details.advanced > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+/* A ⋯ menu of actions. */
+.menu-wrap {
+  position: relative;
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 210px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--surface-2);
+}
+
+.menu-item.danger {
+  color: var(--gap);
+}
+
+/* A card with its menu open stays above the cards after it. */
+.rep-card:has(.menu) {
+  position: relative;
+  z-index: 5;
 }
