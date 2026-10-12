@@ -4,7 +4,8 @@ import { ChildNode, defaultGame, defaultHeaders, makeComment, makePgn, parseComm
 import type { Chess } from 'chessops/chess';
 import { keyOfPos, playSan, turnOfKey, type PlayedMove } from './chess';
 import { mergeNags, cleanNags } from './nags';
-import { movesAt, reachable, ROOT, type RepMove, type Repertoire } from './repertoire';
+import { edgeId, movesAt, reachable, ROOT, type EngineFlag, type RepMove, type Repertoire, type SrsCard } from './repertoire';
+import { State, syncCards } from './srs';
 import { cleanCommentText, commentShapesToTokens, mergeTokens, tokensToCommentShapes } from './shapes';
 
 export interface ImportOptions {
@@ -226,6 +227,68 @@ export function importGames(rep: Repertoire, games: Game<PgnNodeData>[], opts: I
   const changed = added > 0 || comments > 0 || drawings > 0 || symbols > 0;
   const next: Repertoire = changed ? { ...rep, positions, ...(notes ? { notes } : {}), ...(shapes ? { shapes } : {}), updatedAt: now } : rep;
   return { rep: next, games: games.length, added, alreadyHad, found: seen.size + skipped.size, comments, drawings, symbols, alternatives, skippedConflicts, skippedGames, errors };
+}
+
+export interface ReplaceResult extends ImportResult {
+  /** Half-moves of the repertoire that are not in the file: they go. */
+  removed: number;
+  /** Of those, your own moves you had learned. */
+  removedLearned: number;
+  /** Your moves in the file that keep the training progress they had. */
+  keptProgress: number;
+}
+
+/** Every move of the repertoire (reachable from the start), as edge ids. */
+function edgesOf(rep: Repertoire): Set<string> {
+  const out = new Set<string>();
+  for (const key of reachable(rep.positions)) for (const m of movesAt(rep, key)) out.add(edgeId(key, m.uci));
+  return out;
+}
+
+/**
+ * The repertoire becomes what the file holds: its moves, comments, arrows and symbols, nothing else. What is yours and
+ * not in a PGN stays where the move or position stays: your training progress (unless `keepProgress` is false), your
+ * notes on positions and the engine's verdicts on moves. Name, colour, settings and id are kept, so one Undo (and a
+ * sync to other devices) treats it as an edit.
+ */
+export function replaceWithGames(rep: Repertoire, games: Game<PgnNodeData>[], opts: { keepProgress?: boolean } = {}): ReplaceResult {
+  const keepProgress = opts.keepProgress ?? true;
+  const { shapes: _shapes, ...rest } = rep;
+  const empty: Repertoire = { ...rest, positions: {}, notes: {}, cards: {}, engine: {} };
+  const res = importGames(empty, games, { conflicts: 'both' });
+  const fresh = syncCards(res.rep);
+  const before = edgesOf(rep);
+  const after = edgesOf(fresh);
+  const live = reachable(fresh.positions);
+
+  const cards: Record<string, SrsCard> = {};
+  let keptProgress = 0;
+  for (const [id, card] of Object.entries(fresh.cards)) {
+    const old = rep.cards[id];
+    if (keepProgress && old) {
+      cards[id] = old;
+      if (old.state !== State.New) keptProgress++;
+    } else cards[id] = card;
+  }
+  const notes: Record<string, string> = {};
+  for (const key of live) {
+    const note = fresh.notes[key] ?? rep.notes[key];
+    if (note) notes[key] = note;
+  }
+  const engine: Record<string, EngineFlag> = Object.fromEntries(Object.entries(rep.engine).filter(([id]) => after.has(id)));
+  const removedIds = [...before].filter((id) => !after.has(id));
+  const removedLearned = removedIds.filter((id) => rep.cards[id] && rep.cards[id].state !== State.New).length;
+  const added = [...after].filter((id) => !before.has(id)).length;
+
+  return {
+    ...res,
+    rep: { ...fresh, cards, notes, engine, updatedAt: Date.now() },
+    added,
+    alreadyHad: after.size - added,
+    removed: removedIds.length,
+    removedLearned,
+    keptProgress,
+  };
 }
 
 /** Some programs write "[%cal Ge2e4, Rd7d5]" with spaces; chessops only reads the commas-only form. */

@@ -1,22 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
-import { importGames, parseGames, type ImportResult } from '../lib/pgn';
+import { importGames, parseGames, replaceWithGames, type ImportResult, type ReplaceResult } from '../lib/pgn';
 import { toMoves, type Repertoire } from '../lib/repertoire';
 import { useApp } from '../lib/store';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 
 type Conflicts = 'both' | 'keep-mine';
+type Mode = 'add' | 'replace';
 
 const count = (n: number) => n.toLocaleString();
 const plural = (n: number, one: string, many = `${one}s`) => `${count(n)} ${n === 1 ? one : many}`;
 
-/** Adds the lines of a PGN (pasted or from a file) to an existing repertoire. What the file contains is
- *  shown first, so nothing is added blindly; one Undo takes the whole import back. */
+/** Adds the lines of a PGN (pasted or from a file) to an existing repertoire, or replaces what it holds with them.
+ *  What the file contains (and, when replacing, what goes) is shown first, so nothing happens blindly; one Undo takes
+ *  the whole import back. */
 export function ImportPgnDialog({ rep, onClose }: { rep: Repertoire; onClose: () => void }) {
   const [text, setText] = useState('');
   const [file, setFile] = useState<{ name: string; size: number } | null>(null);
+  const [mode, setMode] = useState<Mode>('add');
+  const [keepProgress, setKeepProgress] = useState(true);
   const [conflicts, setConflicts] = useState<Conflicts>('both');
-  const [result, setResult] = useState<ImportResult | null>(null);
+  const [result, setResult] = useState<ImportResult | ReplaceResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const games = useRef<{ text: string; parsed: ReturnType<typeof parseGames> } | null>(null);
@@ -34,7 +38,7 @@ export function ImportPgnDialog({ rep, onClose }: { rep: Repertoire; onClose: ()
     const timer = setTimeout(() => {
       try {
         if (games.current?.text !== text) games.current = { text, parsed: parseGames(text) };
-        const res = importGames(rep, games.current.parsed, { conflicts });
+        const res = mode === 'replace' ? replaceWithGames(rep, games.current.parsed, { keepProgress }) : importGames(rep, games.current.parsed, { conflicts });
         if (!stale) {
           setResult(res);
           setFailure(null);
@@ -52,7 +56,7 @@ export function ImportPgnDialog({ rep, onClose }: { rep: Repertoire; onClose: ()
       stale = true;
       clearTimeout(timer);
     };
-  }, [text, conflicts, rep]);
+  }, [text, conflicts, rep, mode, keepProgress]);
 
   const readFile = async (f: File | undefined) => {
     if (!f) return;
@@ -76,6 +80,27 @@ export function ImportPgnDialog({ rep, onClose }: { rep: Repertoire; onClose: ()
   };
 
   const changes = result ? result.added + result.comments + result.drawings + result.symbols : 0;
+  const replacing = mode === 'replace' && !!result && 'removed' in result ? result : null;
+
+  const replace = () => {
+    if (!result || !games.current) return;
+    const parsed = games.current.parsed;
+    const { updateRep, showToast, undoLast } = useApp.getState();
+    let done = result as ReplaceResult;
+    updateRep(
+      rep.id,
+      (current) => {
+        done = replaceWithGames(current, parsed, { keepProgress });
+        return done.rep;
+      },
+      'PGN replace',
+    );
+    const total = toMoves(done.alreadyHad + done.added);
+    const parts = [plural(toMoves(done.added), 'new move')];
+    if (done.removed) parts.push(`${plural(toMoves(done.removed), 'move')} removed`);
+    showToast(`Replaced with ${plural(total, 'move')} from the file (${parts.join(', ')})`, { label: 'Undo', run: undoLast });
+    onClose();
+  };
 
   const add = () => {
     if (!result || !games.current) return;
@@ -103,11 +128,34 @@ export function ImportPgnDialog({ rep, onClose }: { rep: Repertoire; onClose: ()
   const side = rep.side === 'white' ? 'White' : 'Black';
 
   return (
-    <Dialog title={`Add lines to “${rep.name}”`} onClose={onClose}>
-      <div className="muted small">
-        Paste a PGN or choose a file (a Lichess study, a Chessable or Chessbook export, ChessBase…). Moves you already have are kept;
-        new lines are added, and comments and arrows or circles are filled in where they are missing.
+    <Dialog title={`Import a PGN into “${rep.name}”`} onClose={onClose}>
+      <div className="row wrap" role="radiogroup" aria-label="What to do with the moves you have now" style={{ gap: 6 }}>
+        <span className={`chip ${mode === 'add' ? 'on' : ''}`} role="radio" aria-checked={mode === 'add'} tabIndex={0} onClick={() => setMode('add')} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setMode('add'))}>
+          Add to it
+        </span>
+        <span className={`chip ${mode === 'replace' ? 'on' : ''}`} role="radio" aria-checked={mode === 'replace'} tabIndex={0} onClick={() => setMode('replace')} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setMode('replace'))}>
+          Replace it
+        </span>
       </div>
+      <div className="muted small">
+        {mode === 'add' ? (
+          <>
+            Paste a PGN or choose a file (a Lichess study, a Chessable or Chessbook export, ChessBase…). Moves you already have
+            are kept; new lines are added, and comments and arrows or circles are filled in where they are missing.
+          </>
+        ) : (
+          <>
+            The repertoire becomes what the file holds: its moves, comments, arrows and symbols. Moves that are not in the
+            file are removed. Your notes on positions that stay, and the engine’s verdicts on moves that stay, are kept.
+          </>
+        )}
+      </div>
+      {mode === 'replace' && (
+        <label className="row small" style={{ gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={keepProgress} onChange={(e) => setKeepProgress(e.target.checked)} />
+          Keep my training progress for the moves that stay
+        </label>
+      )}
 
       <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => (e.preventDefault(), readFile(e.dataTransfer.files?.[0]))} className="stack" style={{ gap: 8 }}>
         {file ? (
@@ -159,7 +207,56 @@ export function ImportPgnDialog({ rep, onClose }: { rep: Repertoire; onClose: ()
       {busy && <div className="muted small">Reading…</div>}
       {failure && <div className="notice error small">{failure}</div>}
 
-      {result && !busy && (
+      {replacing && !busy && result && result.found > 0 && (
+        <>
+          <div className="stat-row wrap">
+            <div className="stat" title={`${count(replacing.alreadyHad + replacing.added)} half-moves`}>
+              <b>{count(toMoves(replacing.alreadyHad + replacing.added))}</b>
+              <span>moves in the file</span>
+            </div>
+            <div className="stat" title={`${count(replacing.added)} half-moves`}>
+              <b>{count(toMoves(replacing.added))}</b>
+              <span>new</span>
+            </div>
+            <div className="stat" title={`${count(replacing.removed)} half-moves`}>
+              <b style={{ color: replacing.removed ? 'var(--gap)' : undefined }}>{count(toMoves(replacing.removed))}</b>
+              <span>removed</span>
+            </div>
+            {keepProgress && (
+              <div className="stat" title="Your moves that stay and that you had already learned">
+                <b>{count(replacing.keptProgress)}</b>
+                <span>keep their progress</span>
+              </div>
+            )}
+          </div>
+          <div className="small muted">
+            {plural(result.games, 'game')} read in the file. You play {side} here, so its {side} moves are your training cards.
+          </div>
+          {replacing.removed > 0 && (
+            <div className="notice small">
+              {plural(toMoves(replacing.removed), 'move')} of your repertoire {toMoves(replacing.removed) === 1 ? 'is' : 'are'} not in the file and{' '}
+              {toMoves(replacing.removed) === 1 ? 'goes' : 'go'}
+              {replacing.removedLearned ? `, with the progress of ${plural(replacing.removedLearned, 'move')} you had learned` : ''}. Undo takes it all
+              back right after.
+            </div>
+          )}
+          {result.errors.length > 0 && (
+            <div className="notice small">
+              <b>Good to know</b>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {result.errors.slice(0, 5).map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+      {mode === 'replace' && result && !busy && result.found === 0 && (
+        <div className="notice error small">No chess moves found in this text. Is it a PGN?</div>
+      )}
+
+      {mode === 'add' && result && !busy && (
         <>
           <div className="stat-row wrap">
             <div className="stat" title={`${count(result.added)} half-moves`}>
@@ -229,9 +326,15 @@ export function ImportPgnDialog({ rep, onClose }: { rep: Repertoire; onClose: ()
         <button className="btn ghost" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn primary" disabled={!result || busy || changes === 0} onClick={add}>
-          {result && changes > 0 ? (result.added > 0 ? `Add ${plural(toMoves(result.added), 'move')}` : 'Add comments & symbols') : 'Add'}
-        </button>
+        {mode === 'replace' ? (
+          <button className={`btn ${replacing?.removed ? 'danger solid' : 'primary'}`} disabled={!replacing || busy || !result || result.found === 0} onClick={replace}>
+            {replacing && result && result.found > 0 ? `Replace with ${plural(toMoves(replacing.alreadyHad + replacing.added), 'move')}` : 'Replace'}
+          </button>
+        ) : (
+          <button className="btn primary" disabled={!result || busy || changes === 0} onClick={add}>
+            {result && changes > 0 ? (result.added > 0 ? `Add ${plural(toMoves(result.added), 'move')}` : 'Add comments & symbols') : 'Add'}
+          </button>
+        )}
       </div>
     </Dialog>
   );

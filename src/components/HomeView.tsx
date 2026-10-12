@@ -188,8 +188,7 @@ export function HomeView() {
                       title="Training paused: no reviews, nothing due. Click to resume."
                       onClick={(e) => {
                         e.stopPropagation();
-                        useApp.getState().updateRep(rep.id, (r) => setPaused(r, false), 'resume training', { undoable: false });
-                        useApp.getState().showToast(`Training of “${rep.name}” resumed`);
+                        togglePause(rep);
                       }}
                     >
                       ⏸ Paused
@@ -200,8 +199,11 @@ export function HomeView() {
               <Menu
                 label={`More for ${rep.name}`}
                 items={[
+                  rep.paused
+                    ? { label: 'Resume training', icon: 'train', onClick: () => togglePause(rep) }
+                    : { label: 'Pause training', icon: 'pause', onClick: () => togglePause(rep) },
                   { label: 'Download as PGN', icon: 'download', onClick: () => downloadRepertoire(rep) },
-                  { label: 'Add lines from a PGN…', icon: 'upload', onClick: () => setImportingId(rep.id) },
+                  { label: 'Import a PGN (add or replace)…', icon: 'upload', onClick: () => setImportingId(rep.id) },
                   { label: 'Delete…', icon: 'trash', danger: true, onClick: () => setDeleting(rep) },
                 ]}
               />
@@ -269,6 +271,13 @@ export function HomeView() {
       )}
     </div>
   );
+}
+
+/** Training paused (no reviews, nothing due; the cards keep their schedule) or resumed. */
+function togglePause(rep: Repertoire) {
+  const { updateRep, showToast } = useApp.getState();
+  updateRep(rep.id, (r) => setPaused(r, !rep.paused), rep.paused ? 'resume training' : 'pause training', { undoable: false });
+  showToast(rep.paused ? `Training of “${rep.name}” resumed` : `Training of “${rep.name}” paused: no reviews until you resume`);
 }
 
 /** All lines as one PGN with variations: opens in Lichess studies, ChessBase, Chessbook and this app. */

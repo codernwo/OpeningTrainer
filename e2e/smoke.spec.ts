@@ -13,7 +13,7 @@ test('a repertoire from a PGN: overview, build and tree', async ({ page }) => {
   await expect(card.locator('.stat', { hasText: 'lines' })).toContainText('2');
   // Actions sit in the ⋯ menu.
   await card.getByRole('button', { name: /More for/ }).click();
-  await expect(page.getByRole('menuitem')).toHaveText(['Download as PGN', 'Add lines from a PGN…', 'Delete…']);
+  await expect(page.getByRole('menuitem')).toHaveText(['Pause training', 'Download as PGN', 'Import a PGN (add or replace)…', 'Delete…']);
   await page.keyboard.press('Escape');
   await go(page, 'Tree');
   await expect(page.locator('.tree-svg text', { hasText: /^Start$/ })).toBeVisible();

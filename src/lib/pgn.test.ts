@@ -312,3 +312,47 @@ describe('what other programs write', () => {
     expect(tags).toEqual(['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result']);
   });
 });
+
+describe('replacing a repertoire with a PGN', () => {
+  it('takes the moves of the file and keeps progress, notes and engine verdicts where they stay', async () => {
+    const { parseGames, replaceWithGames } = await import('./pgn');
+    const { edgeId } = await import('./repertoire');
+    const { gradeCard, Rating, State, syncCards } = await import('./srs');
+    // Now: 1.e4 e5 2.Nf3 Nc6 3.Bb5, and 1.e4 c5 2.Nf3. Both own moves graded once.
+    let rep = syncCards(importPgn(white(), '1. e4 e5 (1... c5 2. Nf3) 2. Nf3 {old comment} Nc6 3. Bb5 *').rep);
+    const e4 = edgeId(START_KEY, 'e2e4');
+    const bb5 = edgeId(after('e4', 'e5', 'Nf3', 'Nc6'), 'f1b5');
+    rep = { ...rep, cards: { ...rep.cards, [e4]: gradeCard(rep.cards[e4], Rating.Good), [bb5]: gradeCard(rep.cards[bb5], Rating.Good) } };
+    rep = { ...rep, notes: { [after('e4', 'e5')]: 'my own note', [after('e4', 'c5')]: 'gone soon' } };
+    rep = { ...rep, engine: { [bb5]: { loss: 80, bestSan: 'Bc4', bestCp: 30, depth: 16, at: 1 } } };
+
+    // The file: 1.e4 e5 2.Nf3 Nc6 3.Bc4 (no Sicilian, Bc4 instead of Bb5).
+    const res = replaceWithGames(rep, parseGames('1. e4 e5 2. Nf3 {new comment} Nc6 3. Bc4 *'));
+    const r = res.rep;
+    expect(movesAt(r, START_KEY).map((m) => m.san)).toEqual(['e4']);
+    expect(movesAt(r, after('e4')).map((m) => m.san)).toEqual(['e5']);
+    expect(movesAt(r, after('e4', 'e5', 'Nf3', 'Nc6')).map((m) => m.san)).toEqual(['Bc4']);
+    expect(movesAt(r, after('e4', 'e5')).find((m) => m.san === 'Nf3')!.comment).toBe('new comment');
+    // Progress stays for e4, Bb5's is gone with Bb5; Bc4 is new.
+    expect(r.cards[e4].state).not.toBe(State.New);
+    expect(r.cards[bb5]).toBeUndefined();
+    expect(r.cards[edgeId(after('e4', 'e5', 'Nf3', 'Nc6'), 'f1c4')].state).toBe(State.New);
+    // The note on a position that stays is kept; the Sicilian's is gone; Bb5's engine verdict too.
+    expect(r.notes).toEqual({ [after('e4', 'e5')]: 'my own note' });
+    expect(r.engine).toEqual({});
+    expect(r.id).toBe(rep.id);
+    expect(res).toMatchObject({ added: 1, removed: 3, removedLearned: 1, keptProgress: 1 });
+  });
+
+  it('can start the training from scratch', async () => {
+    const { parseGames, replaceWithGames } = await import('./pgn');
+    const { edgeId } = await import('./repertoire');
+    const { gradeCard, Rating, State, syncCards } = await import('./srs');
+    let rep = syncCards(importPgn(white(), '1. e4 e5 2. Nf3 *').rep);
+    const e4 = edgeId(START_KEY, 'e2e4');
+    rep = { ...rep, cards: { ...rep.cards, [e4]: gradeCard(rep.cards[e4], Rating.Good) } };
+    const res = replaceWithGames(rep, parseGames('1. e4 e5 2. Nf3 *'), { keepProgress: false });
+    expect(res.rep.cards[e4].state).toBe(State.New);
+    expect(res).toMatchObject({ added: 0, removed: 0, keptProgress: 0 });
+  });
+});

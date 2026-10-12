@@ -357,8 +357,8 @@ export function BuildView() {
                 <Icon name="play" size={14} /> Play from here
               </button>
               <span className="spacer" />
-              <button className="btn sm ghost" title="Add lines from a PGN (paste or file)" onClick={() => setImporting(true)}>
-                <Icon name="upload" size={14} /> Add PGN
+              <button className="btn sm ghost" title="Import a PGN (paste or file): add its lines, or replace the repertoire with it" onClick={() => setImporting(true)}>
+                <Icon name="upload" size={14} /> Import PGN
               </button>
             </div>
           </div>

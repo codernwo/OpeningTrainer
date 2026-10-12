@@ -196,7 +196,7 @@ export function SettingsView() {
                 <Icon name="download" size={16} /> Export PGN
               </button>
               <button className="btn" onClick={() => setImporting(true)}>
-                <Icon name="upload" size={16} /> Add PGN…
+                <Icon name="upload" size={16} /> Import PGN…
               </button>
               <span className="spacer" />
               <button
