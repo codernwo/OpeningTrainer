@@ -17,9 +17,13 @@ import {
   type Repertoire,
 } from '../lib/repertoire';
 import { buildQueue, counts, formatInterval, gradeCard, Rating, resetCards, State, type TrainItem } from '../lib/srs';
-import { activeRep, useApp } from '../lib/store';
+import { activeProfile, activeRep, useApp } from '../lib/store';
+import { gamesOf, useGames } from '../lib/gamesStore';
+import { pickReply, replyCounts, type ReplySource } from '../lib/practiceReply';
 import { saveNow, type SaveResult } from '../lib/sync';
 import { playMoveSound } from '../lib/sound';
+import { useKey } from '../lib/hooks';
+import { moveNo } from '../lib/analysis';
 import { tokensToShapes } from '../lib/shapes';
 import { Board, moveArrow, sideCircle, type Shape } from './Board';
 import { Dialog } from './Dialog';
@@ -381,12 +385,16 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
   const [index, setIndex] = useState(0);
   const [pos, setPos] = useState(ROOT);
   const [lastMove, setLastMove] = useState<[string, string] | null>(null);
-  const [phase, setPhase] = useState<'intro' | 'await' | 'good' | 'bad' | 'done'>('intro');
+  const [phase, setPhase] = useState<'intro' | 'await' | 'also' | 'good' | 'bad' | 'done'>('intro');
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [mistake, setMistake] = useState(false);
   const [hinted, setHinted] = useState(false);
   const [message, setMessage] = useState<React.ReactNode>(null);
   const [score, setScore] = useState({ good: 0, bad: 0 });
+  // After a mistake, or when there is a comment or note to read, the session waits for Continue.
+  const [waiting, setWaiting] = useState(false);
+  // Looking back through the line with the arrow keys: the ply shown, or null for the position of the card.
+  const [peek, setPeek] = useState<number | null>(null);
   const [flash, triggerFlash] = useFlash();
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const later = (fn: () => void, ms: number) => timers.current.push(setTimeout(fn, ms));
@@ -436,6 +444,8 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
     }
     setMistake(false);
     setHinted(false);
+    setWaiting(false);
+    setPeek(null);
     setMessage(null);
     setShapes([]);
     const last = path.at(-1);
@@ -448,11 +458,13 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
       if (last) playMoveSound(last);
       setPhase('await');
       if (item.kind === 'learn') {
+        // A new move comes with everything the author wrote around it: on the opponent's move, the position and yours.
+        const w = authorWords(rep, item, path);
         setShapes([moveArrow(item.uci, rep.side)]);
         setMessage(
           <>
             New move: play <b>{item.san}</b>
-            {comment(rep, item) && <div className="comment-text small muted">{comment(rep, item)}</div>}
+            <AuthorText words={[w.theirs, w.note, w.mine]} />
           </>,
         );
       }
@@ -479,16 +491,40 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
   };
 
   const next = () => setIndex((i) => i + 1);
+  const proceed = () => {
+    setWaiting(false);
+    next();
+  };
+
+  // The position of the card, back on the board (after a wrong move, or another move of yours).
+  const backToCard = (shapes: Shape[] = []) => {
+    setPos(item.from);
+    setLastMove(path.length ? uciToArrow(path[path.length - 1].uci) : null);
+    setShapes(shapes);
+    setPhase('await');
+  };
 
   const onMove = (orig: string, dest: string) => {
-    if (phase !== 'await' || !item) return;
+    if (phase !== 'await' || !item || peek !== null) return;
     const m = moveFromBoard(pos, orig, dest);
     if (!m) return;
-    const ok = movesAt(rep, item.from).some((x) => x.uci === m.uci);
+    const mine = movesAt(rep, item.from);
     playMoveSound(m);
     setPos(m.to);
     setLastMove(uciToArrow(m.uci));
-    if (ok) {
+    if (m.uci !== item.uci && mine.some((x) => x.uci === m.uci)) {
+      // Another move of yours: not wrong, but this card asks for its own move, so it stays open.
+      setPhase('also');
+      setMessage(
+        <>
+          <b>{m.san}</b> is in your repertoire too, but this card asks for {mine.length > 2 ? 'another' : 'your other'} move here.
+        </>,
+      );
+      const keep = shapes;
+      later(() => backToCard(keep), 1100);
+      return;
+    }
+    if (m.uci === item.uci) {
       triggerFlash('flash-good');
       setShapes([]);
       setPhase('good');
@@ -503,13 +539,16 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
         setScore((s) => ({ ...s, good: s.good + 1 }));
         info = `Correct! Next review in ${formatInterval(due - Date.now())}.`;
       }
+      const w = authorWords(rep, item, path);
       setMessage(
         <>
           {info}
-          {comment(rep, item) && <div className="comment-text small muted">{comment(rep, item)}</div>}
+          <AuthorText words={[w.note, w.mine]} />
         </>,
       );
-      later(next, mistake || comment(rep, item) ? 1400 : 700);
+      // Time to read: after a mistake, or when the author wrote something here (a new move showed it already).
+      if (mistake || ((w.note || w.mine) && item.kind !== 'learn')) setWaiting(true);
+      else later(next, 700);
     } else {
       triggerFlash('flash-bad');
       setPhase('bad');
@@ -524,20 +563,33 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
           Not your repertoire move. Play <b>{item.san}</b>.
         </>,
       );
-      later(() => {
-        setPos(item.from);
-        setLastMove(path.length ? uciToArrow(path[path.length - 1].uci) : null);
-        setShapes([moveArrow(item.uci, rep.side)]);
-        setPhase('await');
-      }, 650);
+      later(() => backToCard([moveArrow(item.uci, rep.side)]), 650);
     }
   };
 
+  const canHint = phase === 'await' && peek === null && item?.kind !== 'learn' && !hinted && !mistake;
   const hint = () => {
-    if (!item || phase !== 'await') return;
+    if (!item || !canHint) return;
     setHinted(true);
     setShapes([sideCircle(uciToArrow(item.uci)[0], rep.side)]);
   };
+
+  // Keys: Space or Enter goes on, H gives the hint, ← and → look back through the line and return.
+  useKey(
+    (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const onButton = (e.target as HTMLElement | null)?.tagName === 'BUTTON';
+      if ((e.key === ' ' || e.key === 'Enter') && waiting) {
+        if (onButton) return;
+        proceed();
+      } else if (e.key === 'h' || e.key === 'H') hint();
+      else if (e.key === 'ArrowLeft' && phase === 'await' && path.length) setPeek((p) => Math.max(0, (p ?? path.length) - 1));
+      else if (e.key === 'ArrowRight' && peek !== null) setPeek(peek + 1 >= path.length ? null : peek + 1);
+      else return;
+      e.preventDefault();
+    },
+    [waiting, phase, peek, path, canHint, item],
+  );
 
   if (phase === 'done' || !item) {
     const c = counts(rep);
@@ -569,17 +621,18 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
   }
 
   const context = formatLine(path.map((p) => p.san));
+  const peeking = peek !== null;
   return (
     <div className="train">
       <div className="board-area">
         <Board
           className={flash}
-          position={pos}
+          position={peeking ? (peek ? path[peek - 1].to : path[0].from) : pos}
           orientation={rep.side}
-          movable={phase === 'await' ? rep.side : null}
-          lastMove={lastMove}
-          shapes={shapes}
-          drawn={drawn}
+          movable={phase === 'await' && !peeking ? rep.side : null}
+          lastMove={peeking ? (peek ? uciToArrow(path[peek - 1].uci) : null) : lastMove}
+          shapes={peeking ? [] : shapes}
+          drawn={peeking ? undefined : drawn}
           onMove={onMove}
         />
       </div>
@@ -597,13 +650,25 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
           </div>
           <div className="small muted">{context || 'Starting position'}</div>
           <OpeningLabel keys={path.map((p) => p.to)} />
-          <div className={`feedback ${phase === 'good' ? 'good' : phase === 'bad' || mistake ? 'bad' : 'info'}`}>
-            {message ?? (item.kind === 'retry' ? 'Once more: what do you play here?' : 'What do you play here?')}
+          <div className={`feedback ${phase === 'good' ? 'good' : phase === 'bad' || (mistake && phase !== 'also') ? 'bad' : 'info'}`}>
+            {peeking ? (
+              <>
+                Looking back: after {peek ? `${moveNo(path[peek - 1].ply)}${path[peek - 1].san}` : 'the start'}. Press → to return.
+              </>
+            ) : (
+              (message ?? (item.kind === 'retry' ? 'Once more: what do you play here?' : 'What do you play here?'))
+            )}
           </div>
           <div className="row">
-            <button className="btn" onClick={hint} disabled={phase !== 'await' || item.kind === 'learn' || hinted || mistake}>
-              <Icon name="hint" size={16} /> Hint
-            </button>
+            {waiting ? (
+              <button className="btn primary" onClick={proceed}>
+                Continue <Icon name="next" size={16} />
+              </button>
+            ) : (
+              <button className="btn" onClick={hint} disabled={!canHint}>
+                <Icon name="hint" size={16} /> Hint
+              </button>
+            )}
             <span className="spacer" />
             <button className="btn ghost" onClick={stop}>
               Stop
@@ -612,8 +677,9 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
           <PositionLinks line={path} positionKey={item.from} orientation={rep.side} />
         </div>
         <div className="help">
-          A hint (which piece) counts as “hard”, a wrong move as “again”. Cards you got wrong come back at the end of the
-          session.
+          A hint (which piece) counts as “hard”, a wrong move as “again”. Another of your moves does not count: each card asks
+          for its own. Cards you got wrong come back at the end of the session.
+          <span className="desktop-only"> Keys: Space continue, H hint, ← → look back through the line.</span>
         </div>
       </div>
     </div>
@@ -646,8 +712,50 @@ function comment(rep: Repertoire, item: TrainItem): string | undefined {
   return movesAt(rep, item.from).find((m) => m.uci === item.uci)?.comment;
 }
 
-/** Ungraded practice: plays random prepared opponent moves; you answer with your repertoire until the line ends. */
+interface Words {
+  label: string;
+  text: string;
+}
+
+/** What the author wrote around a card: the comment on the opponent's move before it, the note on the position, and
+ *  the comment on your move. */
+function authorWords(rep: Repertoire, item: TrainItem, path: PathStep[]): { theirs?: Words; note?: Words; mine?: Words } {
+  const last = path.at(-1);
+  const theirs = last ? movesAt(rep, last.from).find((m) => m.uci === last.uci)?.comment?.trim() : undefined;
+  const note = rep.notes[item.from]?.trim();
+  const mine = comment(rep, item)?.trim();
+  return {
+    theirs: theirs && last ? { label: `${moveNo(last.ply)}${last.san}`, text: theirs } : undefined,
+    note: note ? { label: 'Note', text: note } : undefined,
+    mine: mine ? { label: `${moveNo(path.length)}${item.san}`, text: mine } : undefined,
+  };
+}
+
+/** The author's comments and notes, each with the move (or "Note") it belongs to. */
+export function AuthorText({ words }: { words: (Words | undefined)[] }) {
+  const shown = words.filter((w): w is Words => !!w);
+  if (!shown.length) return null;
+  return (
+    <div className="stack author-text" style={{ gap: 4, marginTop: 6 }}>
+      {shown.map((w) => (
+        <div key={w.label} className="comment-text small">
+          <b className="muted">{w.label}</b> {w.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Ungraded practice: plays prepared opponent moves, as often as people play them; you answer with your repertoire
+ *  until the line ends. */
 function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: PathStep[]; depth?: number; onExit: () => void }) {
+  const profile = useApp(activeProfile);
+  const gamesData = useGames((s) => s.data);
+  // Counted once per session: what your opponents played against this colour in your games.
+  const own = useMemo(() => replyCounts(gamesOf(gamesData, rep.profileId), rep.side), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [source, setSource] = useState<ReplySource | null>(null);
+  // The comment on the move you just played, in view until your next move.
+  const [said, setSaid] = useState<Words | null>(null);
   const startKey = start.at(-1)?.to ?? ROOT;
   const startArrow = start.length ? uciToArrow(start[start.length - 1].uci) : null;
   const [pos, setPos] = useState(startKey);
@@ -678,6 +786,7 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
     setLine(start.map((s) => s.san));
     setShapes([]);
     setMessage(null);
+    setSaid(null);
     setWaiting(false);
     setRound((r) => r + 1);
   };
@@ -702,13 +811,23 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
     }
     if (isMine(rep, pos)) return;
     setWaiting(true);
-    later(() => {
-      const m = moves[Math.floor(Math.random() * moves.length)];
-      go(m.to, m.uci);
-      playMoveSound(m);
-      setLine((l) => [...l, m.san]);
-      setWaiting(false);
-    }, 500);
+    let alive = true;
+    const at = pos;
+    const shown = Date.now();
+    pickReply(moves, at, { ratings: profile?.ratings ?? [], speeds: profile?.speeds ?? [], own }).then(({ move: m, source }) => {
+      if (!alive) return;
+      if (moves.length > 1) setSource(source);
+      // At least half a second of "thinking", as before.
+      later(() => {
+        go(m.to, m.uci);
+        playMoveSound(m);
+        setLine((l) => [...l, m.san]);
+        setWaiting(false);
+      }, Math.max(0, 500 - (Date.now() - shown)));
+    });
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pos, round]);
 
@@ -721,11 +840,14 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
       triggerFlash('flash-good');
       setShapes([]);
       setMessage(null);
+      const text = expected.find((x) => x.uci === m.uci)?.comment?.trim();
+      setSaid(text ? { label: `${moveNo(line.length)}${m.san}`, text } : null);
       setStats((s) => ({ ...s, good: s.good + 1 }));
       go(m.to, m.uci);
       setLine((l) => [...l, m.san]);
     } else {
       triggerFlash('flash-bad');
+      setSaid(null);
       setStats((s) => ({ ...s, bad: s.bad + 1 }));
       setShown(m.to);
       setWaiting(true);
@@ -767,6 +889,18 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
           <div className="small muted">{formatLine(line) || 'Starting position'}</div>
           <OpeningLabel keys={(lineFromSans(line) ?? []).map((m) => m.to)} />
           <div className="feedback info">{message ?? (isMine(rep, pos) ? (movesAt(rep, pos).length ? 'Your move.' : 'Nothing prepared here.') : 'Opponent is thinking…')}</div>
+          {said && <AuthorText words={[said]} />}
+          {source && (
+            <div className="small faint">
+              The opponent picks from your prepared replies{' '}
+              {source === 'database'
+                ? 'as often as they are played on Lichess (your rating groups and speeds)'
+                : source === 'games'
+                  ? 'as often as your opponents played them in your games'
+                  : 'at random (no Lichess connection and none of your games here)'}
+              .
+            </div>
+          )}
           <div className="row">
             <button className="btn" onClick={restart}>
               New line

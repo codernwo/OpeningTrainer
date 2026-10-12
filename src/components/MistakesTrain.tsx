@@ -8,6 +8,8 @@ import { downloadText } from '../lib/download';
 import { formatInterval, Rating } from '../lib/srs';
 import { activeRep, useApp } from '../lib/store';
 import { saveNow, type SaveResult } from '../lib/sync';
+import { shuffle } from '../lib/random';
+import { useKey } from '../lib/hooks';
 import { Board, sideCircle, type Shape } from './Board';
 import { Icon } from './Icon';
 import { SavedNote, saveMessage } from './SaveIndicator';
@@ -114,7 +116,7 @@ export function MistakesTrain() {
               >
                 <Icon name="train" size={16} /> Start ({c.due + Math.min(c.fresh, newLimit)})
               </button>
-              <button className="btn" onClick={() => setSession([...cards].sort(() => Math.random() - 0.5))} title="All your mistake cards, due or not">
+              <button className="btn" onClick={() => setSession(shuffle(cards))} title="All your mistake cards, due or not">
                 <Icon name="target" size={16} /> Drill all ({cards.length})
               </button>
             </div>
@@ -399,11 +401,27 @@ function MistakeSession({ initial, onExit }: { initial: MistakeCard[]; onExit: (
   };
 
   const hint = () => {
-    if (!card) return;
+    if (!card || hinted || phase !== 'await') return;
     setHinted(true);
     const best = sanToUci(card.key, card.best[0]);
     if (best) setShapes([sideCircle(uciToArrow(best)[0], card.side)]);
   };
+
+  // Keys: Space or Enter for the next card, H for the hint.
+  const finishedNow = phase === 'good' || phase === 'revealed';
+  useKey(
+    (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const onButton = (e.target as HTMLElement | null)?.tagName === 'BUTTON';
+      if ((e.key === ' ' || e.key === 'Enter') && finishedNow) {
+        if (onButton) return;
+        setIndex((i) => i + 1);
+      } else if (e.key === 'h' || e.key === 'H') hint();
+      else return;
+      e.preventDefault();
+    },
+    [finishedNow, phase, hinted, card],
+  );
 
   const stop = () => {
     if (unsaved.current) {
@@ -565,6 +583,7 @@ function MistakeSession({ initial, onExit }: { initial: MistakeCard[]; onExit: (
         </div>
         <div className="help">
           A hint (which piece) counts as “hard”, a wrong move or “show the move” as “again”. Missed cards come back at the end of the session.
+          <span className="desktop-only"> Keys: Space next, H hint.</span>
         </div>
       </div>
     </div>

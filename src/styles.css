@@ -1612,8 +1612,21 @@ a.btn {
   overflow: auto;
 }
 
-.field > label.radio {
+.field > label.radio,
+.field > label.row {
   font-weight: 400;
+}
+
+/* Half white, half black: "random colour", or "partly done". Drawn, so it looks the same on every device. */
+.half-dot {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+  vertical-align: -0.05em;
+  box-sizing: border-box;
 }
 
 .btn[aria-pressed='true'] {
@@ -2983,5 +2996,12 @@ button.rating-tile:disabled {
   }
   .material-plus {
     margin-left: 8px;
+  }
+}
+
+/* Keyboard, right-click and hover tips mean nothing on a touch screen. */
+@media (hover: none) and (pointer: coarse) {
+  .desktop-only {
+    display: none !important;
   }
 }

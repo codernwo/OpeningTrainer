@@ -697,7 +697,7 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
               ♔ White
             </button>
             <button className={`btn ${color === 'random' ? 'primary' : ''}`} onClick={() => setColor('random')} title="White or Black, drawn for each game">
-              ◐ Random
+              <span className="half-dot" aria-hidden /> Random
             </button>
             <button className={`btn ${color === 'black' ? 'primary' : ''}`} onClick={() => setColor('black')}>
               ♚ Black

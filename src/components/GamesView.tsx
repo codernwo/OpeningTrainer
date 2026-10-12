@@ -186,7 +186,16 @@ function GamesList() {
   );
 }
 
-/** Lichess games fetched before the app kept clock times: fetch them again to add the times (nothing else changes). */
+/** Why these Lichess games have no clock times: fetched before the app kept them, or added from a PGN file without them. */
+function clockReason(games: readonly PlayedGame[]): string {
+  const fromFile = games.filter((g) => g.source === 'pgn').length;
+  if (!fromFile) return 'fetched before the app kept them';
+  if (fromFile === games.length) return games.length === 1 ? 'it came from a PGN file without them' : 'they came from a PGN file without them';
+  return 'fetched before the app kept them, or from a PGN file without them';
+}
+
+/** Lichess games without clock times (fetched before the app kept them, or from a PGN file without them): fetch them
+ *  from Lichess to add the times (nothing else changes). */
 function ClockUpdateNotice({ games }: { games: PlayedGame[] }) {
   const missing = useMemo(() => lichessGamesWithoutClocks(games), [games]);
   const [busy, setBusy] = useState(false);
@@ -215,8 +224,8 @@ function ClockUpdateNotice({ games }: { games: PlayedGame[] }) {
     <div className="notice small row wrap">
       <Icon name="refresh" size={16} />
       <span style={{ flex: 1 }}>
-        {plural(missing.length, 'Lichess game')} {missing.length === 1 ? 'has' : 'have'} no clock times yet (fetched before the app kept them). Fetching{' '}
-        {missing.length === 1 ? 'it' : 'them'} again adds the times; the analysis stays as it is.
+        {plural(missing.length, 'Lichess game')} {missing.length === 1 ? 'has' : 'have'} no clock times yet ({clockReason(missing)}). Lichess
+        still has them: fetching {missing.length === 1 ? 'the game' : 'the games'} adds the times; the analysis stays as it is.
       </span>
       <button className="btn sm" disabled={busy} onClick={update}>
         {busy ? `Fetching… ${count || ''}` : 'Add clock times'}

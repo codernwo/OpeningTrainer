@@ -99,7 +99,8 @@ function completion(old: PlayedGame, next: PlayedGame): Partial<PlayedGame> | nu
   return Object.keys(patch).length ? patch : null;
 }
 
-/** Older Lichess games without clock times (fetched before the app kept them); daily games have none. */
+/** Lichess games without clock times (fetched before the app kept them, or from a PGN file without them); daily
+ *  games have none. */
 export function lichessGamesWithoutClocks(games: readonly PlayedGame[]): PlayedGame[] {
   return games.filter((g) => g.id.includes('|lichess:') && g.speed !== 'correspondence' && !g.clocks?.some((c) => c !== null));
 }

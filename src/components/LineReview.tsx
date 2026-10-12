@@ -9,7 +9,9 @@ import { playMoveSound } from '../lib/sound';
 import { Board, moveArrow, sideCircle, type Shape } from './Board';
 import { Icon } from './Icon';
 import { SavedNote, saveMessage } from './SaveIndicator';
-import { PositionLinks, useFlash } from './TrainView';
+import { AuthorText, PositionLinks, useFlash } from './TrainView';
+import { useKey } from '../lib/hooks';
+import { moveNo } from '../lib/analysis';
 import { OpeningLabel } from './OpeningLabel';
 
 /**
@@ -40,6 +42,8 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
   const [phase, setPhase] = useState<'auto' | 'await' | 'between' | 'done'>('auto');
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [message, setMessage] = useState<React.ReactNode>(null);
+  // The comment on the move you just played.
+  const [said, setSaid] = useState<{ label: string; text: string } | null>(null);
   const [missed, setMissed] = useState(false);
   const [hinted, setHinted] = useState(false);
   const [score, setScore] = useState({ lines: 0, good: 0, bad: 0 });
@@ -77,6 +81,7 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
     setPos(startKey);
     setLastMove(startMove ? uciToArrow(startMove.uci) : null);
     setShapes([]);
+    setSaid(null);
     setMessage(pass.current === 'test' ? 'Your new moves once more, without help.' : null);
     setLineNo((n) => n + 1);
   };
@@ -121,10 +126,23 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
     }
     setPhase('await');
     if (teaching) {
+      // With everything the author wrote around it: on the opponent's move, the position and yours.
+      const prev = i > 0 ? plan[i - 1] : startMove;
+      const theirs = prev ? movesAt(rep, prev.from).find((x) => x.uci === prev.uci)?.comment?.trim() : undefined;
+      const note = rep.notes[m.from]?.trim();
+      const mine = movesAt(rep, m.from).find((x) => x.uci === m.uci)?.comment?.trim();
+      const ply = start.length + i;
       setShapes([moveArrow(m.uci, rep.side)]);
       setMessage(
         <>
           New move: play <b>{m.san}</b>
+          <AuthorText
+            words={[
+              theirs && prev ? { label: `${moveNo(ply - 1)}${prev.san}`, text: theirs } : undefined,
+              note ? { label: 'Note', text: note } : undefined,
+              mine ? { label: `${moveNo(ply)}${m.san}`, text: mine } : undefined,
+            ]}
+          />
         </>,
       );
     } else setShapes([]);
@@ -148,7 +166,26 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
     const target = lineTargets.current.has(current.id);
     const card = rep.cards[current.id];
     playMoveSound(m);
-    if (movesAt(rep, pos).some((x) => x.uci === m.uci)) {
+    if (m.uci !== current.uci && movesAt(rep, pos).some((x) => x.uci === m.uci)) {
+      // Another move of yours: not wrong, but this line asks for the other one, which stays open.
+      setPhase('auto');
+      setPos(m.to);
+      setLastMove(uciToArrow(m.uci));
+      setMessage(
+        <>
+          <b>{m.san}</b> is in your repertoire too, but this line goes on with your other move here.
+        </>,
+      );
+      const keep = shapes;
+      later(() => {
+        setPos(current.from);
+        setLastMove(i > 0 && plan ? uciToArrow(plan[i - 1].uci) : startMove ? uciToArrow(startMove.uci) : null);
+        setShapes(keep);
+        setPhase('await');
+      }, 1100);
+      return;
+    }
+    if (m.uci === current.uci) {
       triggerFlash('flash-good');
       if (teaching) taught.current.add(current.id);
       else if (target && !missed) {
@@ -156,27 +193,13 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
         setScore((s) => ({ ...s, good: s.good + 1 }));
       }
       setShapes([]);
-      if (m.uci !== current.uci) {
-        // Another move of yours here: right, but this line goes on with the one it planned.
-        setMessage(
-          <>
-            Also yours. This line goes on with <b>{current.san}</b>.
-          </>,
-        );
-        setPhase('auto');
-        setPos(m.to);
-        setLastMove(uciToArrow(m.uci));
-        later(() => {
-          setPos(current.to);
-          setLastMove(uciToArrow(current.uci));
-          setI((x) => x + 1);
-        }, 900);
-      } else {
-        setMessage(null);
-        setPos(current.to);
-        setLastMove(uciToArrow(current.uci));
-        setI((x) => x + 1);
-      }
+      // The comment on your move stays in view while the line goes on, until your next move.
+      const said = movesAt(rep, pos).find((x) => x.uci === m.uci)?.comment?.trim();
+      setSaid(said ? { label: `${moveNo(start.length + i)}${m.san}`, text: said } : null);
+      setMessage(null);
+      setPos(current.to);
+      setLastMove(uciToArrow(current.uci));
+      setI((x) => x + 1);
       return;
     }
     triggerFlash('flash-bad');
@@ -186,6 +209,7 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
       setScore((s) => ({ ...s, bad: s.bad + 1 }));
     }
     setMissed(true);
+    setSaid(null);
     setPhase('auto');
     setPos(m.to);
     setLastMove(uciToArrow(m.uci));
@@ -202,11 +226,20 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
     }, 650);
   };
 
+  const canHint = !!current && phase === 'await' && !teaching && !hinted && !missed;
   const hint = () => {
-    if (!current || phase !== 'await') return;
+    if (!current || !canHint) return;
     setHinted(true);
     setShapes([sideCircle(uciToArrow(current.uci)[0], rep.side)]);
   };
+  useKey(
+    (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || (e.key !== 'h' && e.key !== 'H')) return;
+      hint();
+      e.preventDefault();
+    },
+    [canHint, current],
+  );
 
   // Session finished: save right away and show the result.
   useEffect(() => {
@@ -291,8 +324,9 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
           <div className={`feedback ${missed ? 'bad' : 'info'}`}>
             {message ?? (phase === 'await' ? 'Your move.' : 'Opponent is thinking…')}
           </div>
+          {said && !teaching && <AuthorText words={[said]} />}
           <div className="row">
-            <button className="btn" onClick={hint} disabled={phase !== 'await' || teaching || hinted || missed}>
+            <button className="btn" onClick={hint} disabled={!canHint}>
               <Icon name="hint" size={16} /> Hint
             </button>
             <span className="spacer" />
@@ -305,6 +339,7 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
         <div className="help">
           You play every one of your moves in the line; the opponent’s are played for you. Moves that are due count as in
           the card review; a move that is not due only counts when you get it wrong.
+          <span className="desktop-only"> Key: H hint.</span>
         </div>
       </div>
     </div>

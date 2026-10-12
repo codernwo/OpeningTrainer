@@ -62,7 +62,7 @@ export function StatusMark({ status }: { status: ItemStatus }) {
   if (status.state === 'open') return null;
   return (
     <span className={`status-mark ${status.state}`} title={status.note}>
-      {status.state === 'done' ? <Icon name="check" size={14} /> : '◐'}
+      {status.state === 'done' ? <Icon name="check" size={14} /> : <span className="half-dot" aria-label="partly done" />}
     </span>
   );
 }
