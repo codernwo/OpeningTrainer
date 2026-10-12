@@ -1,6 +1,6 @@
 // Repertoire checks: gaps against what people actually play (Lichess database) and
 // move quality (engine).
-import { keyToFen, playSan, type Side } from './chess';
+import { keyToFen, playSan, turnOfKey, type Side } from './chess';
 import { evaluate, scoreCp, type Evaluation } from './evaluate';
 import { AuthRequiredError, explorerCacheKey, fetchExplorer, peekCache, totalGames, warmCache, type ExplorerResult } from './lichess';
 import { buildTree, edgeId, isMine, movesAt, ROOT, type EngineFlag, type Repertoire, type TreeNode } from './repertoire';
@@ -47,7 +47,13 @@ export interface GapOptions {
   /** Ignore everything that happens in fewer than this share of your games. */
   minReach: number;
   maxPly: number;
+  /** Also every reply played in at least this share of the games from a position you reach in `minReach` of your
+   *  games or more (the rule of the red boxes in Tree and Build, applied to the positions the check walks). */
+  localShare?: number;
 }
+
+/** A reply played in at least this share of the games from its position is a gap there (Tree, Build, the check). */
+export const LOCAL_GAP_SHARE = 0.05;
 
 type Explore = (key: string) => Promise<ExplorerResult>;
 
@@ -167,7 +173,9 @@ export async function findGaps(
   }
 
   report.coverage = Math.max(0, 1 - uncovered);
-  report.gaps = [...gaps.values()].filter((g) => g.reach >= opts.minReach).map(({ best: _b, ...g }) => g).sort((a, b) => b.reach - a.reach);
+  // Every position walked was reached in at least minReach of your games, so a reply common there counts too.
+  const keep = (g: Gap) => g.reach >= opts.minReach || (opts.localShare !== undefined && g.share >= opts.localShare);
+  report.gaps = [...gaps.values()].filter(keep).map(({ best: _b, ...g }) => g).sort((a, b) => b.reach - a.reach);
   report.lineEnds = [...ends.values()].map(({ best: _b, ...e }) => e).sort((a, b) => b.reach - a.reach);
   return report;
 }
@@ -268,4 +276,19 @@ export function lossLabel(loss: number): { symbol: string; tone: 'ok' | 'dubious
   if (loss >= 100) return { symbol: '?', tone: 'mistake' };
   if (loss >= 50) return { symbol: '?!', tone: 'dubious' };
   return { symbol: '', tone: 'ok' };
+}
+
+/** About how often you reach the end of `steps` in your games with `side`: the shares of the opponent's moves along
+ *  this move order, from the database answers this device has (null when one is missing). */
+export function reachOfLine(steps: readonly { from: string; san: string }[], side: Side, ratings: number[], speeds: string[]): number | null {
+  let reach = 1;
+  for (const m of steps) {
+    if (turnOfKey(m.from) === side) continue;
+    const stats = peekCache<ExplorerResult>(explorerCacheKey({ db: 'lichess', fen: keyToFen(m.from), ratings, speeds }));
+    const total = stats ? totalGames(stats) : 0;
+    const hit = stats?.moves.find((x) => x.san === m.san);
+    if (!total || !hit) return null;
+    reach *= totalGames(hit) / total;
+  }
+  return reach;
 }

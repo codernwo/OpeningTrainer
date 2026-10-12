@@ -12,6 +12,7 @@ import { createElement } from 'react';
 import { loadMaia, MAIA_DOWNLOAD_MB, MAIA_MAX, MAIA_MIN, isMaiaDownloaded, useMaia } from '../lib/maia';
 import { chooseOpponentMove, type MoveSource, type OpponentSettings } from '../lib/opponent';
 import { findMove, movesAt, type Repertoire } from '../lib/repertoire';
+import { ALL_IN_PLAY, scopedReps, useScopeOf, type RepScope } from '../lib/repScope';
 import { activeProfile, activeRep, profileRating, useApp, type Profile } from '../lib/store';
 import { engine } from '../lib/engine';
 import { getToken } from '../lib/lichess';
@@ -23,6 +24,7 @@ import { OpeningLabel } from './OpeningLabel';
 import { Icon } from './Icon';
 import { RatingChart } from './RatingChart';
 import { RatingDiff } from './RatingDiff';
+import { RepScopePicker } from './RepScopePicker';
 
 interface GameConfig {
   start: PlayedMove[];
@@ -32,7 +34,13 @@ interface GameConfig {
   tc: TimeControl;
   /** Counts for your rating (only with a clock, from the starting position). */
   rated: boolean;
+  /** The repertoires your moves are checked against: all in play or one (see repScope.ts). */
+  scope?: RepScope;
+  /** The colour was drawn at random (and is drawn again for the next game). */
+  randomColour?: boolean;
 }
+
+const drawColour = (): Side => (Math.random() < 0.5 ? 'white' : 'black');
 
 export function levelName(level: number): string {
   if (level < 1000) return 'beginner';
@@ -43,7 +51,7 @@ export function levelName(level: number): string {
   return 'master';
 }
 
-function readPrefs(): Partial<{ level: number; mode: OpponentSettings['mode']; coach: boolean; tc: TimeControl; rated: boolean }> {
+function readPrefs(): Partial<{ level: number; mode: OpponentSettings['mode']; coach: boolean; tc: TimeControl; rated: boolean; random: boolean }> {
   try {
     return JSON.parse(localStorage.getItem('play-prefs') ?? '{}');
   } catch {
@@ -125,7 +133,8 @@ export function PlayView() {
         resume={session.resume}
         onNew={() => setSession(null)}
         onRematch={() => {
-          setSession({ config: session.config });
+          const c = session.config;
+          setSession({ config: c.randomColour ? { ...c, color: drawColour() } : c });
           setRound((r) => r + 1);
         }}
       />
@@ -310,13 +319,18 @@ function RatingCard({ ratings, preferred }: { ratings: PlayerRatings; preferred:
   const latest = played.slice().sort((a, b) => (byCategory[b].lastPlayed ?? 0) - (byCategory[a].lastPlayed ?? 0))[0];
   const shown = picked && byCategory[picked].games ? picked : preferred && byCategory[preferred].games ? preferred : latest;
   const book = useMemo(() => {
-    const rep = shownRun.run.repId ? reps.find((r) => r.id === shownRun.run.repId) : undefined;
-    return rep ? { rep, ...bookStats(shownRun.games, rep) } : null;
-  }, [shownRun, reps]);
+    const id = shownRun.run.repId;
+    if (id === ALL_IN_PLAY)
+      return { label: 'Your whole repertoire (in play)', side: null, ...bookStats(shownRun.games, (side) => scopedReps(reps, profile.id, side, ALL_IN_PLAY)) };
+    const rep = id ? reps.find((r) => r.id === id) : undefined;
+    return rep
+      ? { label: `${rep.name} (${rep.side === 'white' ? '♔ White' : '♚ Black'})`, side: rep.side, ...bookStats(shownRun.games, (side) => (side === rep.side ? [rep] : [])) }
+      : null;
+  }, [shownRun, reps, profile.id]);
   if (!ratings.runs.some((r) => r.games.length) && ratings.runs.length === 1) return null;
   const isCurrent = shownRun === ratings.current;
   const { won, drawn, lost } = shownRun.record;
-  const repName = (id?: string) => reps.find((r) => r.id === id)?.name;
+  const repName = (id?: string) => (id === ALL_IN_PLAY ? 'whole repertoire' : reps.find((r) => r.id === id)?.name);
   return (
     <div className="card card-pad stack">
       <div className="row wrap">
@@ -382,18 +396,17 @@ function RatingCard({ ratings, preferred }: { ratings: PlayerRatings; preferred:
       )}
       {book && (
         <div className="notice small book-stats">
-          <b>
-            {book.rep.name} ({book.rep.side === 'white' ? '♔ White' : '♚ Black'})
-          </b>
+          <b>{book.label}</b>
           {book.games ? (
             <>
               {' '}
-              · {book.games} {book.games === 1 ? 'game' : 'games'} with {book.rep.side}: in your preparation for{' '}
+              · {book.games} {book.games === 1 ? 'game' : 'games'}
+              {book.side ? ` with ${book.side}` : ''}: in your preparation for{' '}
               <b>{book.avgMoves.toFixed(1)}</b> moves on average · <b>you left it</b> {book.youLeft}× · Maia left it {book.theyLeft}× ·
               end of your preparation {book.end}×
             </>
           ) : (
-            <> · no rated games with {book.rep.side} in this run yet.</>
+            <> · no rated games{book.side ? ` with ${book.side}` : ''} in this run yet.</>
           )}
         </div>
       )}
@@ -407,16 +420,18 @@ function RatingCard({ ratings, preferred }: { ratings: PlayerRatings; preferred:
   );
 }
 
-/** How the rated games of a run with the repertoire's colour followed it: for how many moves, and who left it first. */
-function bookStats(games: readonly PlayedGame[], rep: Repertoire) {
+/** How the rated games of a run followed your preparation (`repsFor` the colour of each game; none: not counted): for
+ *  how many moves, and who left it first. */
+function bookStats(games: readonly PlayedGame[], repsFor: (side: Side) => Repertoire[]) {
   let n = 0;
   let plies = 0;
   let youLeft = 0;
   let theyLeft = 0;
   let end = 0;
   for (const g of games) {
-    if (g.myColor !== rep.side) continue;
-    const c = prepCheck(g.moves, positionKeys(g.moves), [rep], rep.side);
+    const reps = repsFor(g.myColor);
+    if (!reps.length) continue;
+    const c = prepCheck(g.moves, positionKeys(g.moves), reps, g.myColor);
     n++;
     if (c.kind === 'none') continue;
     plies += c.ply;
@@ -461,6 +476,7 @@ function NewRunDialog({ profile, runs, onClose }: { profile: Profile; runs: numb
           <label className="small">About an opening (optional)</label>
           <select className="input" value={repId} onChange={(e) => setRepId(e.target.value)}>
             <option value="">No particular opening</option>
+            <option value={ALL_IN_PLAY}>Your whole repertoire: all in play, random colour</option>
             {reps.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name} ({r.side === 'white' ? 'White' : 'Black'})
@@ -469,7 +485,8 @@ function NewRunDialog({ profile, runs, onClose }: { profile: Profile; runs: numb
           </select>
           <div className="help">
             For a new opening: the run shows how long your rated games with its colour stayed in your preparation, and who
-            left it first — you or Maia. New games are played with its colour.
+            left it first — you or Maia. New games are played with its colour. With your whole repertoire, the colour is
+            drawn for each game and every game is checked against your repertoires in play for its colour.
           </div>
         </div>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
@@ -552,14 +569,16 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
   const clampLevel = (r: number) => Math.min(MAIA_MAX, Math.max(MAIA_MIN, Math.round(r / 100) * 100));
   // From a game review: the opponent's rating in that game.
   const [level, setLevel] = useState(setup?.level ? clampLevel(setup.level) : (prefs.level ?? clampLevel(profileRating(profile))));
-  // A run about an opening is played with that repertoire's colour.
+  // A run about an opening is played with that repertoire's colour; one about your whole repertoire with either.
   const run = runsOf(profile.ratingRuns).at(-1)!;
   const runRep = useApp((s) => (run.repId ? s.data.repertoires.find((r) => r.id === run.repId) : undefined));
-  const [color, setColor] = useState<Side>(setup?.color ?? runRep?.side ?? rep?.side ?? 'white');
+  const runColour = run.repId === ALL_IN_PLAY ? 'random' : runRep?.side;
+  const [color, setColor] = useState<Side | 'random'>(setup?.color ?? runColour ?? (prefs.random ? 'random' : undefined) ?? rep?.side ?? 'white');
   useEffect(() => {
-    if (runRep && !setup?.color) setColor(runRep.side);
+    if (runColour && !setup?.color) setColor(runColour);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.id]);
+  const scope = useScopeOf(profile.id);
   const [mode, setMode] = useState<OpponentSettings['mode']>(prefs.mode ?? 'realistic');
   const [coach, setCoach] = useState(prefs.coach ?? true);
   const [tc, setTc] = useState<TimeControl>(prefs.tc ?? { minutes: 0, increment: 0 });
@@ -585,9 +604,12 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
   }, []);
   useEffect(() => {
     // A level taken over from a game is not remembered as your usual choice.
-    localStorage.setItem('play-prefs', JSON.stringify({ level: setup?.level ? (prefs.level ?? level) : level, mode, coach, tc, rated }));
+    localStorage.setItem(
+      'play-prefs',
+      JSON.stringify({ level: setup?.level ? (prefs.level ?? level) : level, mode, coach, tc, rated, random: color === 'random' }),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, mode, coach, tc, rated]);
+  }, [level, mode, coach, tc, rated, color]);
 
   const go = async () => {
     setError(null);
@@ -600,7 +622,9 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
       // opponent, whatever your other ratings (its rating is its level).
       onStart({
         start,
-        color,
+        color: color === 'random' ? drawColour() : color,
+        randomColour: color === 'random',
+        scope,
         coach: isRated ? false : coach,
         tc,
         rated: isRated,
@@ -668,9 +692,12 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
 
         <div className="field">
           <label>You play</label>
-          <div className="row">
+          <div className="row wrap">
             <button className={`btn ${color === 'white' ? 'primary' : ''}`} onClick={() => setColor('white')}>
               ♔ White
+            </button>
+            <button className={`btn ${color === 'random' ? 'primary' : ''}`} onClick={() => setColor('random')} title="White or Black, drawn for each game">
+              ◐ Random
             </button>
             <button className={`btn ${color === 'black' ? 'primary' : ''}`} onClick={() => setColor('black')}>
               ♚ Black
@@ -688,7 +715,7 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
           run={run.id === 'first' ? null : run.name}
           category={category ? CATEGORY_NAMES[category].toLowerCase() : ''}
           level={shownLevel}
-          white={color === 'white'}
+          white={color !== 'black'}
           fair={fair}
           onRated={setRated}
           onLevel={setRatedPick}
@@ -726,6 +753,13 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
           <input type="checkbox" checked={coach && !isRated} disabled={isRated} onChange={(e) => setCoach(e.target.checked)} />
           Tell me when I leave my repertoire{isRated ? ' (not in rated games)' : ''}
         </label>
+        <div className="field">
+          <RepScopePicker profileId={profile.id} side={color === 'random' ? undefined : color} label="Your repertoire:" />
+          <div className="help">
+            What your moves are checked against: the “in your repertoire” mark, the hints, and the opponent that stays inside
+            your repertoire. One repertoire counts for its own colour; the other colour keeps all in play.
+          </div>
+        </div>
 
         {maia.status === 'downloading' && (
           <div className="stack" style={{ gap: 4 }}>
@@ -814,8 +848,12 @@ function CapturedPieces({ pieces, color, plus }: { pieces: Captured[]; color: Si
 }
 
 function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig; resume?: Resume; onNew: () => void; onRematch: () => void }) {
-  const rep = useApp(activeRep);
   const profile = useApp(activeProfile)!;
+  // Your repertoires for the colour you play: all in play, or the one picked (see repScope.ts).
+  const allReps = useApp((s) => s.data.repertoires);
+  const myReps = useMemo(() => scopedReps(allReps, profile.id, config.color, config.scope ?? ALL_IN_PLAY), [allReps, profile.id, config.color, config.scope]);
+  const preparedAt = (key: string) => myReps.flatMap((r) => movesAt(r, key)).filter((m, i, all) => all.findIndex((x) => x.uci === m.uci) === i);
+  const inRep = (from: string, uci: string) => myReps.some((r) => !!findMove(r, from, uci));
   const { openLine, showToast, openGame } = useApp.getState();
   const [moves, setMoves] = useState<PlayedMove[]>(resume?.moves ?? config.start);
   const [sources, setSources] = useState<Source[]>(resume?.sources ?? config.start.map(() => 'start'));
@@ -982,9 +1020,9 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
   const key = moves.at(-1)?.to ?? START_KEY;
   const turn = turnOfKey(key);
   const myTurn = turn === config.color;
-  const coachRep: Repertoire | null = config.coach && !config.rated && rep && rep.side === config.color ? rep : null;
+  const coach = config.coach && !config.rated && myReps.length > 0;
   // Still inside the repertoire: every move so far is a prepared move.
-  const inBook = useMemo(() => !!rep && moves.every((m) => !!findMove(rep, m.from, m.uci)), [rep, moves]);
+  const inBook = useMemo(() => myReps.length > 0 && moves.every((m) => inRep(m.from, m.uci)), [myReps, moves]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const history = useMemo(() => [START_KEY, ...moves.map((m) => m.to)], [moves]);
 
@@ -1046,7 +1084,7 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
     setThinking(true);
     setError(null);
     const started = Date.now();
-    chooseOpponentMove(rep, key, config.settings)
+    chooseOpponentMove(myReps, key, config.settings)
       .then(async (choice) => {
         // Humans take a moment; so does this opponent (less when its clock runs low).
         const c = clockRef.current;
@@ -1054,9 +1092,9 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
         const wait = Math.min(350 + Math.random() * 700, budget) - (Date.now() - started);
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
         if (cancelled || !alive.current || !choice || record.current.result) return;
-        const leftBook = inBook && rep && !findMove(rep, choice.move.from, choice.move.uci) && movesAt(rep, key).length > 0;
+        const leftBook = inBook && !inRep(choice.move.from, choice.move.uci) && preparedAt(key).length > 0;
         play(choice.move, choice.source);
-        if (coachRep && leftBook) {
+        if (coach && leftBook) {
           setNotice({ text: <>The opponent left your preparation with {choice.move.san} — you are on your own now.</> });
         }
       })
@@ -1072,7 +1110,7 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
     if (!myTurn || result || thinking) return;
     const m = moveFromBoard(key, orig, dest);
     if (!m) return;
-    const prepared = coachRep && inBook ? movesAt(coachRep, key) : [];
+    const prepared = coach && inBook ? preparedAt(key) : [];
     setNotice(
       prepared.length && !prepared.some((p) => p.uci === m.uci)
         ? { text: <>You left your repertoire: you prepared <b>{prepared.map((p) => p.san).join(' or ')}</b> here.</>, takeback: true }
@@ -1167,7 +1205,7 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
               </div>
             </div>
             <span className="spacer" />
-            {inBook && rep && !config.rated && <span className="badge mine">in your repertoire</span>}
+            {inBook && !config.rated && <span className="badge mine">in your repertoire</span>}
           </div>
           <OpeningLabel keys={history} />
           <div className={`feedback ${result ? 'info' : myTurn ? 'good' : 'info'}`}>{status}</div>

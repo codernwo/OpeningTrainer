@@ -8,6 +8,8 @@ export interface SavedGaps {
   report: GapReport;
   at: number;
   minReach: number;
+  /** The search also kept replies played in at least this share of the games from their position. */
+  localShare?: number;
   /** Fingerprints of what the search depended on, to tell whether the repertoire or the filters changed since. */
   repHash?: string;
   filters?: string;
@@ -79,8 +81,15 @@ export function engineChanged(rep: Repertoire, saved: SavedEngine): 'repertoire'
 /** At most this many early line ends are kept: the page shows the first 15. */
 const KEEP_ENDS = 30;
 
-export function savedGaps(rep: Repertoire, report: GapReport, minReach: number, filters: string): SavedGaps {
-  return { report: { ...report, lineEnds: report.lineEnds.slice(0, KEEP_ENDS) }, at: Date.now(), minReach, repHash: repFingerprint(rep).all, filters };
+export function savedGaps(rep: Repertoire, report: GapReport, minReach: number, filters: string, localShare?: number): SavedGaps {
+  return {
+    report: { ...report, lineEnds: report.lineEnds.slice(0, KEEP_ENDS) },
+    at: Date.now(),
+    minReach,
+    ...(localShare !== undefined ? { localShare } : {}),
+    repHash: repFingerprint(rep).all,
+    filters,
+  };
 }
 
 export function savedEngine(rep: Repertoire, issues: EngineIssue[], threshold: number, depth: number): SavedEngine {

@@ -2940,3 +2940,17 @@ button.rating-tile:disabled {
 .book-stats {
   line-height: 1.6;
 }
+
+/* Check against all repertoires in play, or one. */
+.rep-scope select.input {
+  width: auto;
+  max-width: 100%;
+  padding: 3px 8px;
+  font-size: 13px;
+}
+
+/* A gap found by the "common in a position you reach often" rule, rarer than the threshold itself. */
+.badge.gap.local {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--gap);
+}

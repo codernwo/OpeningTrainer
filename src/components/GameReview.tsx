@@ -21,7 +21,9 @@ import { useKey } from '../lib/hooks';
 import { cardFromMoment, mistakeId } from '../lib/mistakes';
 import { useApp } from '../lib/store';
 import { positionKeys, prepCheck } from '../lib/insights';
-import { inPlay, movesAt } from '../lib/repertoire';
+import { movesAt } from '../lib/repertoire';
+import { scopedReps, useScopeOf } from '../lib/repScope';
+import { RepScopePicker } from './RepScopePicker';
 import { themesOf } from '../lib/themes';
 import { isGoodToo } from '../lib/checkMove';
 import { OpeningLabel } from './OpeningLabel';
@@ -476,14 +478,24 @@ export function GameReview({ game }: { game: PlayedGame }) {
 function OpeningCheck({ game }: { game: PlayedGame }) {
   const allReps = useApp((s) => s.data.repertoires);
   const { openLine, setActiveRep } = useApp.getState();
-  // Checked against the repertoires in play for the colour you had.
-  const reps = useMemo(
-    () => allReps.filter((r) => r.profileId === game.profileId && r.side === game.myColor && inPlay(r)),
-    [allReps, game.profileId, game.myColor],
-  );
+  // Checked against the repertoires in play for the colour you had, or the one you picked.
+  const scope = useScopeOf(game.profileId);
+  const reps = useMemo(() => scopedReps(allReps, game.profileId, game.myColor, scope), [allReps, game.profileId, game.myColor, scope]);
+  const anyOfColour = allReps.some((r) => r.profileId === game.profileId && r.side === game.myColor);
   const keys = useMemo(() => positionKeys(game.moves), [game.moves]);
   const check = useMemo(() => prepCheck(game.moves, keys, reps, game.myColor), [game.moves, keys, game.myColor, reps]);
-  if (!reps.length || check.kind === 'none') return null;
+  if (!anyOfColour) return null;
+  const picker = <RepScopePicker profileId={game.profileId} side={game.myColor} />;
+  if (!reps.length || check.kind === 'none')
+    return (
+      <div className="card card-pad stack" style={{ gap: 6 }}>
+        <h3>Your repertoire</h3>
+        <div className="small muted">
+          {reps.length ? 'This game did not start in this preparation.' : `No repertoire with ${game.myColor} in play.`}
+        </div>
+        {picker}
+      </div>
+    );
   const line = gameLine(game.moves);
   const owner = (ply: number) => reps.find((r) => movesAt(r, keys[Math.min(ply, keys.length - 1)]).length > 0) ?? reps[0];
   const build = (plies: number, label: string, at: number) => (
@@ -528,6 +540,7 @@ function OpeningCheck({ game }: { game: PlayedGame }) {
       <h3>Your repertoire{reps.length === 1 ? `: ${reps[0].name}` : ''}</h3>
       <div className="small">{text}</div>
       {action && <div>{action}</div>}
+      {picker}
     </div>
   );
 }

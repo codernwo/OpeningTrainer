@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { moveFromBoard, moveNumber, playSan, turnOfKey, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
-import { lossLabel } from '../lib/audit';
-import { totalGames } from '../lib/lichess';
+import { keyToFen, moveFromBoard, moveNumber, playSan, turnOfKey, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
+import { LOCAL_GAP_SHARE, lossLabel, reachOfLine } from '../lib/audit';
+import { explorerCacheKey, totalGames, warmCache } from '../lib/lichess';
 import { useEvaluation, useExplorer, useKey } from '../lib/hooks';
 import {
   addLine,
@@ -56,7 +56,7 @@ function writePref(key: string, value: unknown) {
 }
 
 /** Opponent moves played in at least this share of games count as gaps when unprepared. */
-export const GAP_SHARE = 0.05;
+export const GAP_SHARE = LOCAL_GAP_SHARE;
 
 export function BuildView() {
   const rep = useApp(activeRep)!;
@@ -105,6 +105,20 @@ export function BuildView() {
   }, [explorer.data, ply]);
 
   const repMoves = movesAt(rep, key);
+  // How often you reach this position in your games (from the database answers this device has seen; those of the
+  // earlier positions of the line are read from the cache first).
+  const [cacheTick, setCacheTick] = useState(0);
+  useEffect(() => {
+    const keys = line
+      .slice(0, ply)
+      .filter((m) => turnOfKey(m.from) !== rep.side)
+      .map((m) => explorerCacheKey({ db: 'lichess', fen: keyToFen(m.from), ratings: profile.ratings, speeds: profile.speeds }));
+    if (keys.length) warmCache(keys).then((n) => n && setCacheTick((t) => t + 1));
+  }, [line, ply, rep.side, profile.ratings, profile.speeds]);
+  const reach = useMemo(
+    () => (explorer.data ? reachOfLine(line.slice(0, ply), rep.side, profile.ratings, profile.speeds) : null),
+    [line, ply, rep.side, profile.ratings, profile.speeds, explorer.data, cacheTick], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const mine = isMine(rep, key);
   const current = line.slice(0, ply);
   const firstUnsaved = current.findIndex((m) => !findMove(rep, m.from, m.uci));
@@ -408,6 +422,7 @@ export function BuildView() {
                 repSide={rep.side}
                 repMoves={repMoves}
                 gapShare={GAP_SHARE}
+                reach={reach}
                 onPlay={playHere}
                 onAdd={addFromExplorer}
                 onHover={setHover}

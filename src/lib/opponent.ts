@@ -56,8 +56,9 @@ async function databaseStats(key: string, s: OpponentSettings) {
   }
 }
 
-export async function chooseOpponentMove(rep: Repertoire | null, key: string, s: OpponentSettings): Promise<OpponentMove | null> {
-  const prepared = rep ? movesAt(rep, key) : [];
+/** `reps`: your repertoires for the colour you play (the opponent's replies in them are its "prepared lines"). */
+export async function chooseOpponentMove(reps: readonly Repertoire[], key: string, s: OpponentSettings): Promise<OpponentMove | null> {
+  const prepared = reps.flatMap((r) => movesAt(r, key)).filter((m, i, all) => all.findIndex((x) => x.uci === m.uci) === i);
   const stats = await databaseStats(key, s);
   const total = stats ? totalGames(stats) : 0;
 

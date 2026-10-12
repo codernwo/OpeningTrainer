@@ -46,4 +46,20 @@ describe('finding gaps', () => {
     const r = await findGaps(rep, { ratings: [], speeds: [], minReach: 0.2, maxPly: 20 }, () => {}, new AbortController().signal, explorer);
     expect(r.gaps.map((g) => g.san).sort()).toEqual(['Bb4', 'g6']);
   });
+
+  it('also, if asked: replies common in a position you reach often, however rare they are in all your games', async () => {
+    // b6: 20% of the Nimzo position (reached in 60%) = 12%; d5 after 1…e6 2.c4: 25% of a position reached in 40% = 10%.
+    const r = await findGaps(
+      rep,
+      { ratings: [], speeds: [], minReach: 0.2, maxPly: 20, localShare: 0.05 },
+      () => {},
+      new AbortController().signal,
+      explorer,
+    );
+    expect(r.gaps.map((g) => g.san).sort()).toEqual(['Bb4', 'b6', 'd5', 'g6']);
+    // Positions reached less often than the threshold are not looked at: at 50%, the route via 1…e6 (40%) stops, so the
+    // Nimzo position comes to 30% and its replies drop out; g6 stays (50% of a position reached in 60%).
+    const strict = await findGaps(rep, { ratings: [], speeds: [], minReach: 0.5, maxPly: 20, localShare: 0.05 }, () => {}, new AbortController().signal, explorer);
+    expect(strict.gaps.map((g) => g.san).sort()).toEqual(['g6']);
+  });
 });

@@ -15,6 +15,8 @@ export interface TourItem {
   status: ItemStatus;
   /** Share of your games (gaps and line ends). */
   reach?: number;
+  /** A gap: how often it is played in its position. */
+  share?: number;
 }
 
 /** The items of one result list, in the order shown on the Check page. */
@@ -24,6 +26,7 @@ export function tourItems(rep: Repertoire, saved: CheckResults | undefined, kind
       id: `${g.key}|${g.san}`,
       line: g.line,
       reach: g.reach,
+      share: g.share,
       label: (
         <>
           {numbered(g.line, g.san)} <span className="muted">· {formatPct(g.reach)} of your games</span>

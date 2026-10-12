@@ -81,7 +81,8 @@ interface LNode {
   name?: { short: string; full: string; shown: string };
   label: string;
   node: TreeNode | null; // null = root or gap ghost
-  ghost?: { san: string; share: number };
+  /** A gap: how often it is played here, and (when known) in what share of all your games. */
+  ghost?: { san: string; share: number; reach?: number };
   share?: number; // popularity of this move among the opponent's choices
   open: boolean;
   children: LNode[];
@@ -171,7 +172,8 @@ export function TreeView() {
 
   const layout = useMemo(() => {
     const nodes: LNode[] = [];
-    const ghostsAt = (key: string, ply: number, prepared: string[]): LNode[] => {
+    // `reach`: about how often you get to `key` in your games (the opponent's shares along the way; NaN when unknown).
+    const ghostsAt = (key: string, ply: number, prepared: string[], reach: number): LNode[] => {
       if (!showGaps || isMine(rep, key) || !prepared.length) return [];
       const result = explorerFor(profile, key);
       if (!result) return [];
@@ -191,7 +193,7 @@ export function TreeView() {
             w: boxWidth(label, formatPct(share)),
             label,
             node: null,
-            ghost: { san: m.san, share },
+            ghost: { san: m.san, share, reach: Number.isFinite(reach) ? reach * share : undefined },
             open: false,
             children: [],
           };
@@ -199,7 +201,7 @@ export function TreeView() {
           return g;
         });
     };
-    const place = (n: TreeNode, parentName: string | undefined): LNode => {
+    const place = (n: TreeNode, parentName: string | undefined, reach: number): LNode => {
       const parentStats = n.mine ? undefined : explorerFor(profile, n.from);
       // Moves outside the explorer's top list come back as 0: too rare to label.
       const rawShare = shareOf(parentStats, n.san);
@@ -227,14 +229,15 @@ export function TreeView() {
       };
       nodes.push(ln);
       const branchName = named?.name ?? parentName;
-      if (ln.open) ln.children = n.children.map((c) => place(c, branchName));
+      const after = n.mine ? reach : reach * (rawShare ?? NaN);
+      if (ln.open) ln.children = n.children.map((c) => place(c, branchName, after));
       if (!n.transposition && (ln.open || !n.children.length)) {
-        ln.children.push(...ghostsAt(n.to, n.ply + 1, movesAt(rep, n.to).map((m) => m.san)));
+        ln.children.push(...ghostsAt(n.to, n.ply + 1, movesAt(rep, n.to).map((m) => m.san), after));
       }
       return ln;
     };
-    const rootChildren = tree.map((n) => place(n, undefined));
-    rootChildren.push(...ghostsAt(ROOT, 0, movesAt(rep, ROOT).map((m) => m.san)));
+    const rootChildren = tree.map((n) => place(n, undefined, 1));
+    rootChildren.push(...ghostsAt(ROOT, 0, movesAt(rep, ROOT).map((m) => m.san), 1));
     const root: LNode = {
       id: 'root',
       col: 0,
@@ -583,7 +586,9 @@ export function TreeView() {
                         goToKey(parentKey);
                       }}
                     >
-                      <title>{`Not prepared: ${ln.ghost.san} (${formatPct(ln.ghost.share)} of games). Click to open.`}</title>
+                      <title>{`Not prepared: ${ln.ghost.san} — played in ${formatPct(ln.ghost.share)} of the games here${
+                        ln.ghost.reach !== undefined ? `, about ${formatPct(ln.ghost.reach)} of all your games (the share the Check counts)` : ''
+                      }. Click to open.`}</title>
                       <rect width={ln.w} height={BOX_H} rx={6} />
                       <text x={8} y={15}>
                         {ln.label} <tspan className="size-label">{formatPct(ln.ghost.share)}</tspan>

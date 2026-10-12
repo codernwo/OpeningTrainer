@@ -14,6 +14,8 @@ import {
   type PrepSummary,
 } from '../lib/insights';
 import { inPlay, type Repertoire } from '../lib/repertoire';
+import { ALL_IN_PLAY, scopedRepsBoth, useRepScope, useScopeOf } from '../lib/repScope';
+import { RepScopePicker } from './RepScopePicker';
 import { THEME_ADVICE, THEME_NAMES } from '../lib/themes';
 import { mistakeCounts } from '../lib/mistakes';
 import { useApp } from '../lib/store';
@@ -62,9 +64,10 @@ export function InsightsView({ games, profileId, suggestions, onChoose }: { game
   }, [filter, profileId]);
 
   const shown = useMemo(() => filterGames(games, filter), [games, filter]);
-  // Your games are checked against the repertoires you play now; study repertoires can be picked below to compare.
-  const playing = useMemo(() => reps.filter(inPlay), [reps]);
-  const i = useMemo(() => computeInsights(shown, playing), [shown, playing]);
+  // Your games are checked against the repertoires you play now, or the one you picked (also a study repertoire).
+  const scope = useScopeOf(profileId);
+  const checked = useMemo(() => scopedRepsBoth(reps, profileId, scope), [reps, profileId, scope]);
+  const i = useMemo(() => computeInsights(shown, checked), [shown, checked]);
   const speeds = [...new Set(games.map((g) => g.speed).filter(Boolean))] as GameSpeed[];
   const cards = mistakeCounts((mistakes ?? []).filter((m) => m.profileId === profileId));
   const toggleSpeed = (s: GameSpeed) => setFilter((f) => ({ ...f, speeds: f.speeds.includes(s) ? f.speeds.filter((x) => x !== s) : [...f.speeds, s] }));
@@ -90,6 +93,12 @@ export function InsightsView({ games, profileId, suggestions, onChoose }: { game
             {c === 'both' ? 'Both colours' : c === 'white' ? '♔ White' : '♚ Black'}
           </span>
         ))}
+        {reps.length > 0 && profileId && (
+          <>
+            <span className="filter-sep" />
+            <RepScopePicker profileId={profileId} label="Repertoire" />
+          </>
+        )}
       </div>
 
       <div className="small muted">
@@ -116,7 +125,7 @@ export function InsightsView({ games, profileId, suggestions, onChoose }: { game
               <TrendCard i={i} games={shown} />
               <OpeningsCard i={i} />
             </div>
-            <RepertoireCard i={i} games={shown} reps={reps} />
+            <RepertoireCard games={shown} reps={reps} />
           </div>
         </>
       )}
@@ -555,17 +564,22 @@ function OpeningsCard({ i }: { i: Insights }) {
   );
 }
 
-function RepertoireCard({ i, games, reps }: { i: Insights; games: PlayedGame[]; reps: Repertoire[] }) {
-  const [picked, setPicked] = useState<string>('in-play');
+function RepertoireCard({ games, reps }: { games: PlayedGame[]; reps: Repertoire[] }) {
+  // The same choice as everywhere else (repScope.ts).
+  const profileId = useApp((s) => s.data.activeProfileId);
+  const scope = useScopeOf(profileId);
+  const setScope = useRepScope((s) => s.set);
+  const picked = scope === ALL_IN_PLAY || reps.some((r) => r.id === scope) ? scope : ALL_IN_PLAY;
   const done = useMemo(() => analysedFacts(games), [games]);
   const rows = useMemo(
     () => [...reps].sort((a, b) => Number(!!a.study) - Number(!!b.study) || a.side.localeCompare(b.side) || a.name.localeCompare(b.name)).map((r) => ({ rep: r, sum: prepSummary(done, [r]) })),
     [reps, done],
   );
   const playing = reps.filter(inPlay);
+  const allInPlay = useMemo(() => prepSummary(done, playing), [done, reps]); // eslint-disable-line react-hooks/exhaustive-deps
   const selected = picked === 'in-play' ? null : rows.find((r) => r.rep.id === picked);
-  const p: PrepSummary = selected ? selected.sum : i.prep;
-  const choose = (id: string) => setPicked(id);
+  const p: PrepSummary = selected ? selected.sum : allInPlay;
+  const choose = (id: string) => profileId && setScope(profileId, id);
 
   return (
     <div className="card card-pad stack span-2">
@@ -595,10 +609,10 @@ function RepertoireCard({ i, games, reps }: { i: Insights; games: PlayedGame[]; 
                   <td>
                     <input type="radio" readOnly checked={picked === 'in-play'} /> All in play ({playing.length})
                   </td>
-                  <td className="num">{i.prep.games}</td>
-                  <td className="num">{i.prep.bookMoves === null ? '–' : i.prep.bookMoves.toFixed(1)}</td>
-                  <td className="num">{i.prep.unprepared.length}</td>
-                  <td className="num">{i.prep.youLeft.length}</td>
+                  <td className="num">{allInPlay.games}</td>
+                  <td className="num">{allInPlay.bookMoves === null ? '–' : allInPlay.bookMoves.toFixed(1)}</td>
+                  <td className="num">{allInPlay.unprepared.length}</td>
+                  <td className="num">{allInPlay.youLeft.length}</td>
                 </tr>
               )}
               {rows.map(({ rep, sum }) => (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatLine } from '../lib/chess';
-import { engineCheck, findGaps, lossLabel } from '../lib/audit';
+import { engineCheck, findGaps, LOCAL_GAP_SHARE, lossLabel } from '../lib/audit';
 import { engineChanged, gapFilters, gapsChanged, savedEngine, savedGaps } from '../lib/checkResults';
 import { StatusMark, tourItems, type TourItem } from './CheckTour';
 import type { CheckTour } from '../lib/store';
@@ -26,6 +26,16 @@ export function AuditView() {
       }
       return next;
     });
+  // Also the replies common in a position you reach often (≥5% there): the rule of the red boxes in Tree and Build.
+  const [localRule, setLocalRuleState] = useState(() => localStorage.getItem('gap-local') !== '0');
+  const setLocalRule = (v: boolean) => {
+    setLocalRuleState(v);
+    try {
+      localStorage.setItem('gap-local', v ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  };
   const [gapRun, setGapRun] = useState<{ done: number; line: string[]; lookups: number } | null>(null);
   const [gapError, setGapError] = useState<Error | null>(null);
   // The last results stay (synced with your data) until you run the check again: work through them one by one.
@@ -65,11 +75,11 @@ export function AuditView() {
     try {
       const report = await findGaps(
         rep,
-        { ratings: profile.ratings, speeds: profile.speeds, ...gapOpts },
+        { ratings: profile.ratings, speeds: profile.speeds, ...gapOpts, localShare: localRule ? LOCAL_GAP_SHARE : undefined },
         (done, line, lookups) => setGapRun({ done, line, lookups }),
         ctrl.signal,
       );
-      saveChecks(rep.id, { gaps: savedGaps(rep, report, gapOpts.minReach, filters) });
+      saveChecks(rep.id, { gaps: savedGaps(rep, report, gapOpts.minReach, filters, localRule ? LOCAL_GAP_SHARE : undefined) });
     } catch (e) {
       if ((e as Error).name !== 'AbortError') setGapError(e as Error);
     } finally {
@@ -115,10 +125,13 @@ export function AuditView() {
   // A higher threshold than the search used is a filter on its results; a lower one needs a new search.
   const shownMin = Math.max(gapOpts.minReach, saved?.gaps?.minReach ?? 0);
   const needsLower = !!saved?.gaps && gapOpts.minReach < saved.gaps.minReach;
+  // The rule of common replies: shown when on, and found only by a search that used it.
+  const localShown = localRule && saved?.gaps?.localShare !== undefined;
+  const needsLocal = !!saved?.gaps && localRule && saved.gaps.localShare === undefined;
   const engChange = saved?.engine ? engineChanged(rep, saved.engine) : null;
   const engSettings =
     !!saved?.engine && (engOpts.threshold !== saved.engine.threshold || (saved.engine.depth !== undefined && engOpts.localDepth !== saved.engine.depth));
-  const gapItems = tourItems(rep, saved, 'gaps').filter((it) => (it.reach ?? 1) >= shownMin);
+  const gapItems = tourItems(rep, saved, 'gaps').filter((it) => (it.reach ?? 1) >= shownMin || (localShown && (it.share ?? 0) >= LOCAL_GAP_SHARE));
   const endItems = tourItems(rep, saved, 'ends');
   const engineItems = tourItems(rep, saved, 'engine');
   // A reply you added since the check moves its games inside your preparation (at least until that line ends).
@@ -147,8 +160,8 @@ export function AuditView() {
           <div className="help">
             The percentage is <b>of all your games with {rep.side === 'white' ? 'White' : 'Black'}</b> (like Chessbook): the shares of the
             opponent’s moves multiplied along the line. A reply played 10% of the time, in a position you reach in 20% of your
-            games, counts as 2%. (The red boxes in the Tree look at one position at a time instead: a reply played in at least 5% of
-            the games from that position.)
+            games, counts as 2%. The red boxes in the Tree and on the build board look at one position at a time instead: a reply
+            played in at least 5% of the games from that position (tick the option below to see those here too).
           </div>
           <div className="row wrap">
             <span className="muted small">Ignore what occurs in less than</span>
@@ -159,6 +172,14 @@ export function AuditView() {
             ))}
             <span className="muted small">of your games</span>
           </div>
+          <label className="row small" style={{ alignItems: 'flex-start', cursor: 'pointer', fontWeight: 400 }}>
+            <input type="checkbox" checked={localRule} onChange={(e) => setLocalRule(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>
+              Also every reply played in {formatPct(LOCAL_GAP_SHARE)} or more of the games <b>from a position you reach in at least{' '}
+              {formatPct(gapOpts.minReach)}</b> of your games — the rule of the red boxes in the Tree and the build board, so they
+              match here. Such a reply can itself be rarer than {formatPct(gapOpts.minReach)} of your games.
+            </span>
+          </label>
           <div className="row">
             {gapRun ? (
               <>
@@ -171,7 +192,7 @@ export function AuditView() {
                 </span>
               </>
             ) : (
-              <button className={`btn ${!gaps || gapChange || needsLower ? 'primary' : ''}`} onClick={runGaps}>
+              <button className={`btn ${!gaps || gapChange || needsLower || needsLocal ? 'primary' : ''}`} onClick={runGaps}>
                 {gaps ? 'Find gaps again' : 'Find gaps'}
               </button>
             )}
@@ -187,7 +208,9 @@ export function AuditView() {
                     ? `${profile.name}’s Lichess filters (ratings, time controls) changed since this search. Search again to use them.`
                     : needsLower
                       ? `These results go down to ${formatPct(saved.gaps.minReach)} of your games. Search again to go down to ${formatPct(gapOpts.minReach)}.`
-                      : null
+                      : needsLocal
+                        ? `This search did not yet look for replies common in a position you reach often (${formatPct(LOCAL_GAP_SHARE)} there). Search again to include them.`
+                        : null
               }
               fresh="Up to date: you have not changed this repertoire since this search."
               how="The search always walks your whole repertoire; positions this device looked up in the last 30 days come from its cache, so only new ones are asked from Lichess."
@@ -250,7 +273,16 @@ export function AuditView() {
                   const g = gaps.gaps.find((x) => `${x.key}|${x.san}` === it.id)!;
                   return (
                     <div key={it.id} className={`result-item ${it.status.state}`} onClick={() => open('gaps', visible(gapItems), it)} title="Open this position to add a reply">
-                      <span className="badge gap num">{formatPct(g.reach)}</span>
+                      <span
+                        className={`badge gap num ${g.reach < shownMin ? 'local' : ''}`}
+                        title={
+                          g.reach < shownMin
+                            ? `${formatPct(g.reach)} of your games: played in ${formatPct(g.share)} of the games from a position you reach in ${formatPct(g.reach / g.share)} of yours`
+                            : `${formatPct(g.reach)} of your games`
+                        }
+                      >
+                        {formatPct(g.reach)}
+                      </span>
                       <LineWithLast line={g.line} last={g.san} />
                       <span className="faint small num">
                         {formatPct(g.share)} here{g.routes > 1 ? ` · ${g.routes} move orders` : ''}

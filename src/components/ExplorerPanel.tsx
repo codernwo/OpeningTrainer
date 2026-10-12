@@ -26,6 +26,8 @@ interface Props {
   repMoves: RepMove[];
   /** Opponent moves above this share that are missing from the repertoire are marked as gaps. */
   gapShare: number;
+  /** About how often you reach this position in your games with this colour (along the line on the board), if known. */
+  reach?: number | null;
   onPlay: (san: string) => void;
   onAdd: (san: string) => void;
   onHover: (uci: string | null) => void;
@@ -38,7 +40,7 @@ export function isGapMove(m: ExplorerMove, total: number, ctx: { oppToMove: bool
   return ctx.oppToMove && ctx.repMoves.length > 0 && !ctx.repMoves.some((r) => r.san === m.san) && share >= ctx.gapShare;
 }
 
-export function ExplorerPanel({ positionKey, result, db, profile, repSide, repMoves, gapShare, onPlay, onAdd, onHover }: Props) {
+export function ExplorerPanel({ positionKey, result, db, profile, repSide, repMoves, gapShare, reach, onPlay, onAdd, onHover }: Props) {
   const updateProfile = useApp((s) => s.updateProfile);
   const setView = useApp((s) => s.setView);
   const [showFilters, setShowFilters] = useState(false);
@@ -169,7 +171,16 @@ export function ExplorerPanel({ positionKey, result, db, profile, repSide, repMo
                       </span>
                     ) : (
                       <>
-                        {isGap && <span className="badge gap">gap</span>}{' '}
+                        {isGap && (
+                          <span
+                            className="badge gap"
+                            title={`Played in ${formatPct(share)} of the games here${
+                              reach ? `; about ${formatPct(reach * share)} of all your games with ${repSide} (this move order)` : ''
+                            }`}
+                          >
+                            gap
+                          </span>
+                        )}{' '}
                         <button
                           className="btn sm icon ghost"
                           title="Add to repertoire"
@@ -188,6 +199,13 @@ export function ExplorerPanel({ positionKey, result, db, profile, repSide, repMo
             })}
           </tbody>
         </table>
+      )}
+      {data && data.moves.length > 0 && oppToMove && reach !== undefined && reach !== null && db === 'lichess' && (
+        <div className="small faint">
+          You reach this position in about <b>{formatPct(reach)}</b> of your games with {repSide} (along this move order), so a
+          reply played here in {formatPct(gapShare)} is about {formatPct(reach * gapShare)} of them. The Check counts gaps by that
+          share of all your games.
+        </div>
       )}
     </div>
   );
