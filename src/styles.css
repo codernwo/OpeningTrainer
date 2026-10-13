@@ -3225,3 +3225,22 @@ details.advanced > summary {
 html {
   scrollbar-gutter: stable;
 }
+
+/* Board and panel side by side (laptop): the panel is exactly as tall as the board and scrolls inside, as on Lichess.
+   Whatever a move adds or removes (a comment, a hint) then never changes the page's height, so nothing below moves and
+   the browser never has to scroll the page. */
+@media (min-width: 901px) {
+  .train > .train-panel {
+    height: var(--board);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+  }
+}
+
+/* "Saving…" and "Saved" take the same room, so the top bar does not shift each time a move is saved. */
+.save-indicator .label {
+  display: inline-block;
+  min-width: 4.6em;
+}
