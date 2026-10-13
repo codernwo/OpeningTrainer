@@ -14,8 +14,7 @@ import { TrainView } from './components/TrainView';
 import { TreeView } from './components/TreeView';
 import { googleClientId, preloadGoogle } from './lib/drive';
 import { useKey } from './lib/hooks';
-import { mistakeCounts } from './lib/mistakes';
-import { counts } from './lib/srs';
+import { useTodayPlan } from './lib/today';
 import { activeRep, orderedReps, PROFILE_COLORS, useApp, type View } from './lib/store';
 import { connectDrive, reconnectMessage, syncNow, useSync } from './lib/sync';
 
@@ -35,6 +34,7 @@ export function App() {
   const view = useApp((s) => s.view);
   const rep = useApp(activeRep);
   const toast = useApp((s) => s.toast);
+  const trainDeck = useApp((s) => s.trainDeck);
   const { undoLast, redoLast, hideToast } = useApp.getState();
 
   useKey(
@@ -80,7 +80,8 @@ export function App() {
   if (needsRep && !rep) content = <HomeView />;
   else if (view === 'build') content = <BuildView key={rep!.id} />;
   else if (view === 'tree') content = <TreeView key={rep!.id} />;
-  else if (view === 'train') content = <TrainView key={rep?.id ?? 'none'} />;
+  // Today's session goes from repertoire to repertoire (selecting each), so it must not start over when the selection changes.
+  else if (view === 'train') content = <TrainView key={trainDeck === 'today' ? 'today' : (rep?.id ?? 'none')} />;
   else if (view === 'games') content = <GamesView />;
   else if (view === 'audit') content = <AuditView key={rep!.id} />;
   else if (view === 'play') content = <PlayView />;
@@ -161,11 +162,8 @@ function TopBar() {
   const { setView, setActiveProfile, setActiveRep, undoLast, redoLast } = useApp.getState();
   const [creating, setCreating] = useState(false);
   const reps = useMemo(() => orderedReps(data, data.activeProfileId), [data]);
-  const mistakes = useApp((s) => s.data.mistakes);
-  const due = useMemo(
-    () => (rep ? counts(rep).due : 0) + mistakeCounts((mistakes ?? []).filter((m) => m.profileId === data.activeProfileId)).due,
-    [rep, mistakes, data.activeProfileId],
-  );
+  // The same number as on the Overview and in today's session.
+  const due = useTodayPlan().total;
 
   return (
     <header className="topbar">

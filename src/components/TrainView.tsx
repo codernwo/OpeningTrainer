@@ -11,12 +11,13 @@ import {
   myEdgesInOrder,
   reachable,
   ROOT,
+  setNote,
   setPaused,
   setTrainDepth,
   type PathStep,
   type Repertoire,
 } from '../lib/repertoire';
-import { buildQueue, counts, formatInterval, gradeCard, Rating, resetCards, State, type TrainItem } from '../lib/srs';
+import { buildQueue, counts, formatInterval, gradeCard, isLeech, Rating, resetCards, State, type TrainItem } from '../lib/srs';
 import { activeProfile, activeRep, useApp } from '../lib/store';
 import { gamesOf, useGames } from '../lib/gamesStore';
 import { pickReply, replyCounts, type ReplySource } from '../lib/practiceReply';
@@ -32,14 +33,17 @@ import { LineReviewSession } from './LineReview';
 import { OpeningLabel } from './OpeningLabel';
 import { DeckTabs, MistakesTrain } from './MistakesTrain';
 import { SavedNote, saveMessage } from './SaveIndicator';
+import { Menu } from './Menu';
+import { SessionSettings, TodayTrain, useTrainPrefs } from './TodayTrain';
 
 type Mode = 'review' | 'lines' | 'line-review';
 
-/** Two decks: the moves of the selected repertoire, and the mistakes from your own games. */
+/** Today's session over everything; one repertoire; or the mistakes from your own games. */
 export function TrainView() {
   const rep = useApp(activeRep);
   const deck = useApp((s) => s.trainDeck);
-  if (!rep || deck === 'mistakes') return <MistakesTrain />;
+  if (deck === 'mistakes') return <MistakesTrain />;
+  if (!rep || deck === 'today') return <TodayTrain />;
   return <RepertoireTrain rep={rep} />;
 }
 
@@ -47,15 +51,10 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
   const scope = useApp((s) => s.trainScope);
   const trainFrom = useApp((s) => s.trainFrom);
   const [mode, setMode] = useState<Mode | null>(null);
-  const [newLimit, setNewLimit] = useState(() => Number(localStorage.getItem('new-limit') ?? 10));
-  useEffect(() => {
-    localStorage.setItem('new-limit', String(newLimit));
-  }, [newLimit]);
-  // Review in whole lines instead of one card at a time (remembered on this device).
-  const [wholeLines, setWholeLines] = useState(() => localStorage.getItem('train-whole-lines') === '1');
-  useEffect(() => {
-    localStorage.setItem('train-whole-lines', wholeLines ? '1' : '0');
-  }, [wholeLines]);
+  // New moves per session and whole lines: the player's choices, synced (shared with today's session).
+  const [prefs] = useTrainPrefs();
+  const newLimit = prefs.newMoves;
+  const wholeLines = prefs.wholeLines;
   // Freeze the queue when a session starts so grading doesn't reshuffle it.
   const [queue, setQueue] = useState<QItem[]>([]);
 
@@ -118,6 +117,9 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
     setMode('review');
   };
 
+  const learnedAny = allBranchEdges.some((e) => rep.cards[edgeId(e.from, e.uci)]?.state !== State.New);
+  const leeches = allBranchEdges.filter((e) => isLeech(rep.cards[edgeId(e.from, e.uci)]));
+  const startCount = c.due + Math.min(c.fresh, newLimit);
   return (
     <div style={{ maxWidth: 760, margin: '0 auto' }} className="stack">
       <DeckTabs />
@@ -130,6 +132,16 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
               <Icon name="x" size={14} /> Whole repertoire
             </button>
           )}
+          <Menu
+            label={`More for ${rep.name}`}
+            items={[
+              rep.paused
+                ? { label: 'Resume training', icon: 'train', onClick: togglePause }
+                : { label: 'Pause training', icon: 'pause', onClick: togglePause },
+              ...(scope && total > 0 && !rep.paused ? [{ label: `Drill the whole branch (${total})`, icon: 'target' as const, onClick: startDrill }] : []),
+              ...(learnedAny ? [{ label: scope ? 'Reset this branch…' : 'Reset progress…', icon: 'undo' as const, danger: true, onClick: () => setResetting(true) }] : []),
+            ]}
+          />
         </div>
         {scope && (
           <div className="notice small">
@@ -145,9 +157,6 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
               <Icon name="train" size={14} /> Resume
             </button>
           </div>
-        )}
-        {maxMove > 1 && allBranchEdges.length > 0 && (
-          <DepthSetting depth={depth} maxMove={maxMove} total={total} fresh={c.fresh} deeper={deeper} onChange={setDepth} />
         )}
         {total === 0 ? (
           <div className="empty">
@@ -176,62 +185,61 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
             <div className="progress" title="Share of your moves you have learned">
               <div style={{ width: `${(c.learned / Math.max(1, total)) * 100}%` }} />
             </div>
-            <div className="row wrap">
-              <span className="muted">New moves per session</span>
-              {[0, 5, 10, 20, 50].map((n) => (
-                <span
-                  key={n}
-                  className={`chip ${newLimit === n ? 'on' : ''}`}
-                  onClick={() => setNewLimit(n)}
-                  title={n === 0 ? 'Only reviews: no new moves this session' : undefined}
-                >
-                  {n}
-                </span>
-              ))}
-              {newLimit === 0 && <span className="small muted">only reviews</span>}
-            </div>
             {newLimit === 0 && !c.due && c.fresh > 0 && (
-              <div className="help">Nothing to review right now. Choose a number of new moves to learn some.</div>
+              <div className="help">Nothing to review right now. Choose a number of new moves in the settings below to learn some.</div>
             )}
-            <label className="row small" style={{ gap: 6, cursor: 'pointer', alignItems: 'flex-start' }}>
-              <input type="checkbox" checked={wholeLines} onChange={(e) => setWholeLines(e.target.checked)} style={{ marginTop: 2 }} />
-              <span>
-                <b>Play whole lines</b>
-                <span className="muted">
-                  {' '}
-                  — you play all your moves of each line{scope ? ' from here' : ' from the start'}, for the reflex. Moves that are due
-                  count as usual; a move that is not due only counts when you get it wrong.
-                </span>
-              </span>
-            </label>
             <div className="row wrap">
-              <button className="btn primary" disabled={rep.paused || !(c.due + Math.min(c.fresh, newLimit))} onClick={startReview}>
-                <Icon name="train" size={16} /> Start review ({c.due + Math.min(c.fresh, newLimit)})
+              <button className="btn primary" disabled={rep.paused || !startCount} onClick={startReview}>
+                <Icon name="train" size={16} /> Start review ({startCount})
               </button>
-              {scope && (
-                <button className="btn" disabled={rep.paused} onClick={startDrill} title="Quiz every one of your moves in this branch, due or not">
-                  <Icon name="target" size={16} /> Drill whole branch ({total})
-                </button>
-              )}
               <button className="btn" onClick={() => setMode('lines')}>
                 <Icon name="tree" size={16} /> Practice lines{scope ? ' from here' : ''}
               </button>
             </div>
-            <div className="row wrap train-admin">
-              {!rep.paused && (
-                <button className="btn sm ghost" onClick={togglePause} title="No reviews and nothing due for this repertoire until you resume">
-                  Pause training
-                </button>
-              )}
-              <button
-                className="btn sm ghost"
-                disabled={!allBranchEdges.some((e) => rep.cards[edgeId(e.from, e.uci)]?.state !== State.New)}
-                onClick={() => setResetting(true)}
-              >
-                {scope ? 'Reset this branch…' : 'Reset progress…'}
-              </button>
-            </div>
           </>
+        )}
+        {allBranchEdges.length > 0 && (
+          <details className="advanced">
+            <summary className="small muted">
+              Settings · {newLimit} new per session · {wholeLines ? 'whole lines' : 'single cards'} · {depth ? `up to move ${depth}` : 'all moves'}
+            </summary>
+            <div className="stack" style={{ gap: 12, marginTop: 10 }}>
+              {maxMove > 1 && <DepthSetting depth={depth} maxMove={maxMove} total={total} deeper={deeper} onChange={setDepth} />}
+              <SessionSettings mistakes={false} />
+            </div>
+          </details>
+        )}
+        {leeches.length > 0 && (
+          <details className="advanced">
+            <summary className="small muted">
+              {leeches.length} {leeches.length === 1 ? 'move' : 'moves'} you keep missing
+            </summary>
+            <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+              <div className="help">
+                Missed {'≥'} 4 times after you had learned them. A note, playing the position against Maia, or a simpler line often helps
+                more than more reviews.
+              </div>
+              {leeches.map((e) => {
+                const path = findPath(rep, e.from) ?? [];
+                const card = rep.cards[edgeId(e.from, e.uci)];
+                return (
+                  <div key={edgeId(e.from, e.uci)} className="row wrap small" style={{ gap: 6 }}>
+                    <span style={{ flex: 1, minWidth: 180 }}>
+                      {formatLine([...path.map((p) => p.san), e.san])} <span className="muted">· missed {card.lapses}×</span>
+                    </span>
+                    <button className="btn sm ghost" onClick={() => useApp.getState().openLine(path)}>
+                      <Icon name="board" size={14} /> Open in Build
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
+        {!!depth && total > 0 && c.fresh === 0 && deeper > 0 && (
+          <div className="notice small">
+            You have learned every move up to move {depth}. When the reviews go well, go one move deeper (Settings, <b>+</b>).
+          </div>
         )}
       </div>
       {resetting && (
@@ -242,34 +250,39 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
           onClose={() => setResetting(false)}
         />
       )}
-      <div className="card card-pad help stack" style={{ gap: 6 }}>
-        <b style={{ color: 'var(--text)' }}>How it works</b>
-        <div>
-          Every move <i>you</i> play is a card. The app plays the line up to that position and you have to find your move.
-          The FSRS algorithm (also used by Anki) schedules the next review: what you know well comes back less and less
-          often, what you forget comes back soon.
+      <details className="card card-pad help">
+        <summary>
+          <b style={{ color: 'var(--text)' }}>How training works</b>
+        </summary>
+        <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+          <div>
+            Every move <i>you</i> play is a card. The app plays the line up to that position and you have to find your move.
+            The FSRS algorithm (also used by Anki) schedules the next review: what you know well comes back less and less
+            often, what you forget comes back soon. <b>Today</b> (the first tab) trains all your repertoires and mistake cards
+            in one go; this tab trains this repertoire only.
+          </div>
+          <div>
+            New moves are shown first (green arrow) and quizzed again later in the same session. Each card asks for its own
+            move: where you have two prepared, the other one does not pass it. <b>Practice lines</b> plays lines all the way
+            through, with the replies as often as people play them, and does not affect the schedule. Use <b>Train from here</b>{' '}
+            in the tree or on the build board to focus on one branch.
+          </div>
+          <div>
+            <b>Train up to move</b> (in the settings, per repertoire) learns a wide repertoire breadth-first: first the opening
+            moves of every line, later deeper. Moves beyond it are left out of every kind of training; the ones you had learned
+            keep their schedule and come back when you go deeper.
+          </div>
+          <div>
+            <b>Play whole lines</b> reviews in lines instead of single cards: you play every one of your moves of each line,
+            for the playing reflex. Due moves count as usual; a move that is not due only counts when you get it wrong.
+          </div>
+          <div>
+            In the <b>⋯</b> menu: <b>Pause training</b> stops the reviews of a repertoire you are not working on now (it no
+            longer counts as due); <b>Resume</b> brings them back. <b>Reset progress</b> makes its moves new again, or those of
+            one branch when you train from there.
+          </div>
         </div>
-        <div>
-          New moves are shown first (green arrow) and quizzed again later in the same session. Each card asks for its own
-          move: where you have two prepared, the other one does not pass it. <b>Practice lines</b> plays lines all the way
-          through, with the replies as often as people play them, and does not affect the schedule. Use <b>Train from here</b> in the tree or on the
-          build board to focus on one branch.
-        </div>
-        <div>
-          <b>Train up to move</b> (per repertoire) learns a wide repertoire breadth-first: first the opening moves of every
-          line, later deeper. Moves beyond it are left out of every kind of training; the ones you had learned keep their
-          schedule and come back when you go deeper.
-        </div>
-        <div>
-          <b>Play whole lines</b> reviews in lines instead of single cards: you play every one of your moves of each line,
-          for the playing reflex. Due moves count as usual; a move that is not due only counts when you get it wrong.
-        </div>
-        <div>
-          <b>Pause training</b> stops the reviews of a repertoire you are not working on now (it no longer counts as due);{' '}
-          <b>Resume</b> brings them back. <b>Reset progress</b> makes its moves new again, or those of one branch when you
-          train from there.
-        </div>
-      </div>
+      </details>
     </div>
   );
 }
@@ -318,14 +331,12 @@ function DepthSetting({
   depth,
   maxMove,
   total,
-  fresh,
   deeper,
   onChange,
 }: {
   depth: number | undefined;
   maxMove: number;
   total: number;
-  fresh: number;
   deeper: number;
   onChange: (d: number | undefined) => void;
 }) {
@@ -352,16 +363,11 @@ function DepthSetting({
           ? `${total} of your moves up to move ${depth}; ${deeper} deeper ${deeper === 1 ? 'one waits' : 'ones wait'} until you go deeper (their schedule is kept).`
           : `Your lines go to move ${maxMove}. For a wide repertoire, train up to an early move first and go deeper once that sits.`}
       </div>
-      {depth && total > 0 && fresh === 0 && deeper > 0 && (
-        <div className="notice small">
-          You have learned every move up to move {depth}. When the reviews go well, go one move deeper with <b>+</b>.
-        </div>
-      )}
     </div>
   );
 }
 
-interface QItem extends TrainItem {
+export interface QItem extends TrainItem {
   kind: 'learn' | 'review' | 'test' | 'retry';
 }
 
@@ -376,7 +382,14 @@ export function useFlash() {
   return [flash, trigger] as const;
 }
 
-function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QItem[]; onExit: () => void }) {
+export interface SessionScore {
+  good: number;
+  bad: number;
+}
+
+/** A card review. With `onDone` (a part of today's session) it hands over its score when the cards run out instead of
+ *  showing its own summary. */
+export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoire; initial: QItem[]; onExit: () => void; onDone?: (score: SessionScore) => void }) {
   const updateRep = useApp((s) => s.updateRep);
   const showToast = useApp((s) => s.showToast);
   const [saved, setSaved] = useState<SaveResult | 'saving' | null>(null);
@@ -397,6 +410,8 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
   // What the author wrote at the card you just found: it goes along to the next card until you answer that one, so
   // there is time to read it without a stop.
   const [carried, setCarried] = useState<Words[] | null>(null);
+  // Missed this card often: the number of times, to offer another way than more reviews.
+  const [leech, setLeech] = useState(0);
   // Looking back through the line with the arrow keys: the ply shown, or null for the position of the card.
   const [peek, setPeek] = useState<number | null>(null);
   const [flash, triggerFlash] = useFlash();
@@ -411,9 +426,18 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
   const taught = rep.shapes?.[item?.from ?? ''];
   const drawn = useMemo(() => (teaching ? (tokensToShapes(taught) as Shape[]) : undefined), [teaching, taught]);
 
-  // Session finished: save right away and show the result.
+  // Session finished: save right away and show the result (or hand over to the next part of today's session).
   useEffect(() => {
-    if (phase !== 'done' || !unsaved.current) return;
+    if (phase !== 'done') return;
+    if (onDone) {
+      if (unsaved.current) {
+        unsaved.current = false;
+        void saveNow();
+      }
+      onDone(score);
+      return;
+    }
+    if (!unsaved.current) return;
     unsaved.current = false;
     setSaved('saving');
     let alive = true;
@@ -450,6 +474,7 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
     setHinted(false);
     setWaiting(false);
     setPeek(null);
+    setLeech(0);
     setMessage(null);
     setShapes([]);
     const last = path.at(-1);
@@ -566,6 +591,8 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
         grade(Rating.Again);
         setScore((s) => ({ ...s, bad: s.bad + 1 }));
         setQueue((q) => [...q, { ...item, kind: 'retry' }]);
+        const card = useApp.getState().data.repertoires.find((r) => r.id === rep.id)?.cards[item.id];
+        if (isLeech(card)) setLeech(card!.lapses);
       }
       setMistake(true);
       setMessage(
@@ -602,6 +629,7 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
   );
 
   if (phase === 'done' || !item) {
+    if (onDone) return null;
     const c = counts(rep);
     return (
       <div style={{ maxWidth: 560, margin: '40px auto' }} className="card card-pad stack">
@@ -669,6 +697,7 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
               (message ?? (item.kind === 'retry' ? 'Once more: what do you play here?' : 'What do you play here?'))
             )}
           </div>
+          {leech > 0 && !peeking && <LeechHelp rep={rep} item={item} path={path} lapses={leech} />}
           {carried && !peeking && phase !== 'good' && (
             <div className="carried">
               <span className="small faint">From the last card</span>
@@ -699,6 +728,63 @@ function ReviewSession({ rep, initial, onExit }: { rep: Repertoire; initial: QIt
           <span className="desktop-only"> Keys: Space continue, H hint, ← → look back through the line.</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A card you keep missing: three other ways than more of the same reviews. */
+function LeechHelp({ rep, item, path, lapses }: { rep: Repertoire; item: TrainItem; path: PathStep[]; lapses: number }) {
+  const [writing, setWriting] = useState(false);
+  const [text, setText] = useState(rep.notes[item.from] ?? '');
+  const [saved, setSaved] = useState(false);
+  const { openLine, playFrom, updateRep } = useApp.getState();
+  const save = () => {
+    updateRep(rep.id, (r) => setNote(r, item.from, text), 'note');
+    setSaved(true);
+    setWriting(false);
+  };
+  return (
+    <div className="notice small stack leech" style={{ gap: 8 }}>
+      <div>
+        <b>You have missed {item.san} here {lapses} times.</b> More of the same reviews rarely help; something different often
+        does:
+      </div>
+      {writing ? (
+        <div className="stack" style={{ gap: 6 }}>
+          <textarea
+            className="input"
+            rows={3}
+            autoFocus
+            value={text}
+            placeholder={`Why ${item.san}? A plan, a trap, a picture to remember it by…`}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn sm primary" onClick={save}>
+              Save note
+            </button>
+            <button className="btn sm ghost" onClick={() => setWriting(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="row wrap" style={{ gap: 6 }}>
+          <button className="btn sm" onClick={() => setWriting(true)} title="A note on this position; it shows with the card after you answer">
+            <Icon name="comment" size={14} /> {saved ? 'Note saved · edit' : rep.notes[item.from] ? 'Edit the note' : 'Add a note'}
+          </button>
+          <button
+            className="btn sm"
+            onClick={() => playFrom(path, { color: rep.side, label: `a move you keep missing (${item.san})` })}
+            title="Play this position against Maia, to feel why the move matters (ends the session; your progress is saved)"
+          >
+            <Icon name="play" size={14} /> Play it vs Maia
+          </button>
+          <button className="btn sm" onClick={() => openLine(path)} title="Open the position on the build board, to simplify or change the line (ends the session; your progress is saved)">
+            <Icon name="board" size={14} /> Simplify in Build
+          </button>
+        </div>
+      )}
     </div>
   );
 }

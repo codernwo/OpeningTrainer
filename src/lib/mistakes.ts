@@ -2,10 +2,11 @@
 // spaced repetition. A card holds everything it needs (the position, the moves that are fine, the engine's
 // line), so it does not depend on the game it came from being on this device.
 import { type Side } from './chess';
-import { explainMoment, formatEval, type KeyMoment, type MomentKind } from './analysis';
+import { divide, explainMoment, formatEval, type KeyMoment, type MomentKind } from './analysis';
 import { gameLabel, gameLine, type PlayedGame } from './games';
 import type { SrsCard } from './repertoire';
 import { newCard, State } from './srs';
+import { themesOf, type Theme } from './themes';
 
 export interface MistakeCard {
   /** `m|<profile id>|<position>`: one card per position, however many games it came up in. */
@@ -100,10 +101,42 @@ export function mistakeCounts(cards: MistakeCard[], now = Date.now()) {
   return { due, fresh, learned, total: cards.length };
 }
 
-/** Due cards first (oldest due first), then up to `newLimit` new ones (oldest first). */
+/** The tactical themes of a card (see themes.ts). */
+export const cardThemes = (c: MistakeCard): Theme[] =>
+  themesOf({ key: c.key, side: c.side, played: c.played, line: c.answer, reply: c.reply, threat: c.threat, bestEval: c.bestEval });
+
+/** Still in the opening at the card's position (Lichess' rule: more than ten pieces and filled back ranks). An
+ *  opening mistake comes back move for move in your next game with that opening. */
+export const isOpeningCard = (c: MistakeCard) => divide([c.key]).middlegame > 0;
+
+/** How often each theme comes up in a deck: the kinds of mistake you keep making. */
+export function themeCounts(cards: readonly MistakeCard[]): Map<Theme, number> {
+  const out = new Map<Theme, number>();
+  for (const c of cards) for (const t of cardThemes(c)) out.set(t, (out.get(t) ?? 0) + 1);
+  return out;
+}
+
+/** Which cards go first: opening mistakes, then the themes you get wrong most often in the deck. */
+function priority(deck: readonly MistakeCard[]) {
+  const counts = themeCounts(deck);
+  const cache = new Map<string, number>();
+  return (c: MistakeCard) => {
+    let p = cache.get(c.id);
+    if (p === undefined) {
+      const recurring = Math.max(0, ...cardThemes(c).map((t) => counts.get(t) ?? 0));
+      p = (isOpeningCard(c) ? 1000 : 0) + recurring;
+      cache.set(c.id, p);
+    }
+    return p;
+  };
+}
+
+/** Due cards first, then up to `newLimit` new ones; within each, opening mistakes first, then the most recurring
+ *  themes, then the oldest. */
 export function mistakeQueue(cards: MistakeCard[], newLimit: number, now = Date.now()): MistakeCard[] {
-  const due = cards.filter((c) => c.card.state !== State.New && c.card.due <= now).sort((a, b) => a.card.due - b.card.due);
-  const fresh = cards.filter((c) => c.card.state === State.New).sort((a, b) => a.createdAt - b.createdAt);
+  const p = priority(cards);
+  const due = cards.filter((c) => c.card.state !== State.New && c.card.due <= now).sort((a, b) => p(b) - p(a) || a.card.due - b.card.due);
+  const fresh = cards.filter((c) => c.card.state === State.New).sort((a, b) => p(b) - p(a) || a.createdAt - b.createdAt);
   return [...due, ...fresh.slice(0, newLimit)];
 }
 

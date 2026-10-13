@@ -3,10 +3,13 @@ import { formatEval, moveNo } from '../lib/analysis';
 import { lineFromSans, moveFromBoard, playSan, sanToUci, START_KEY, uciToArrow } from '../lib/chess';
 import { nullMoveKey } from '../lib/analyzer';
 import { isGoodToo } from '../lib/checkMove';
-import { explainCard, mistakeCounts, mistakeQueue, mistakesToPgn, type MistakeCard } from '../lib/mistakes';
+import { cardThemes, explainCard, mistakeCounts, mistakeQueue, mistakesToPgn, themeCounts, type MistakeCard } from '../lib/mistakes';
 import { downloadText } from '../lib/download';
 import { formatInterval, Rating } from '../lib/srs';
 import { activeRep, useApp } from '../lib/store';
+import { useTodayPlan } from '../lib/today';
+import { useTrainPrefs } from './TodayTrain';
+import { THEME_ADVICE, THEME_NAMES } from '../lib/themes';
 import { saveNow, type SaveResult } from '../lib/sync';
 import { shuffle } from '../lib/random';
 import { useKey } from '../lib/hooks';
@@ -14,11 +17,8 @@ import { Board, sideCircle, type Shape } from './Board';
 import { Icon } from './Icon';
 import { SavedNote, saveMessage } from './SaveIndicator';
 import { PositionLinks, useFlash } from './TrainView';
-import { themesOf } from '../lib/themes';
 import { ThemeChips } from './ThemeChips';
 
-const cardThemes = (c: MistakeCard) =>
-  themesOf({ key: c.key, side: c.side, played: c.played, line: c.answer, reply: c.reply, threat: c.threat, bestEval: c.bestEval });
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
@@ -28,16 +28,20 @@ function useMyMistakes(): MistakeCard[] {
   return useMemo(() => (all ?? []).filter((m) => m.profileId === profileId), [all, profileId]);
 }
 
-/** Switch between the repertoire deck and the mistakes deck. */
+/** Today's session, one repertoire, or the mistakes deck. */
 export function DeckTabs() {
   const rep = useApp(activeRep);
   const deck = useApp((s) => s.trainDeck);
   const setTrainDeck = useApp((s) => s.setTrainDeck);
   const cards = useMyMistakes();
   const due = mistakeCounts(cards).due;
-  const current = !rep ? 'mistakes' : deck;
+  const today = useTodayPlan().total;
+  const current = !rep && deck === 'repertoire' ? 'today' : deck;
   return (
     <div className="deck-tabs" role="tablist">
+      <button role="tab" aria-selected={current === 'today'} className={current === 'today' ? 'on' : ''} onClick={() => setTrainDeck('today')}>
+        Today {today > 0 && <span className="badge due">{today}</span>}
+      </button>
       <button role="tab" aria-selected={current === 'repertoire'} className={current === 'repertoire' ? 'on' : ''} disabled={!rep} onClick={() => setTrainDeck('repertoire')}>
         {rep ? `${rep.side === 'white' ? '♔' : '♚'} ${rep.name}` : 'Repertoire'}
       </button>
@@ -52,11 +56,12 @@ export function MistakesTrain() {
   const cards = useMyMistakes();
   const setView = useApp((s) => s.setView);
   const [session, setSession] = useState<MistakeCard[] | null>(null);
-  const [newLimit, setNewLimit] = useState(() => Number(localStorage.getItem('new-limit-mistakes') ?? 10));
+  // New cards per session: the player's choice, synced (shared with today's session).
+  const [prefs, setPrefs] = useTrainPrefs();
+  const newLimit = prefs.newMistakes;
+  const setNewLimit = (n: number) => setPrefs({ newMistakes: n });
   const [showAll, setShowAll] = useState(false);
-  useEffect(() => {
-    localStorage.setItem('new-limit-mistakes', String(newLimit));
-  }, [newLimit]);
+  const themes = useMemo(() => [...themeCounts(cards)].sort((a, b) => b[1] - a[1]), [cards]);
 
   if (session) return <MistakeSession initial={session} onExit={() => setSession(null)} />;
   const c = mistakeCounts(cards);
@@ -123,6 +128,22 @@ export function MistakesTrain() {
           </>
         )}
       </div>
+      {themes.length > 0 && (
+        <div className="card card-pad stack" style={{ gap: 8 }}>
+          <h3>What keeps coming back</h3>
+          <div className="theme-counts">
+            {themes.map(([t, n]) => (
+              <span key={t} className="theme-chip" title={THEME_ADVICE[t]}>
+                {THEME_NAMES[t]} <b className="num">×{n}</b>
+              </span>
+            ))}
+          </div>
+          <div className="help">
+            {THEME_NAMES[themes[0][0]]} is the kind of mistake in most of your cards. {THEME_ADVICE[themes[0][0]]} Sessions put
+            opening mistakes first (they come back move for move), then the kinds you make most.
+          </div>
+        </div>
+      )}
       {cards.length > 0 && (
         <div className="card card-pad stack">
           <div className="row wrap">
@@ -208,7 +229,9 @@ function CardList({ cards }: { cards: MistakeCard[] }) {
   );
 }
 
-function MistakeSession({ initial, onExit }: { initial: MistakeCard[]; onExit: () => void }) {
+/** Training the mistake cards. With `onDone` (a part of today's session) it hands over its score when the cards run
+ *  out instead of showing its own summary. */
+export function MistakeSession({ initial, onExit, onDone }: { initial: MistakeCard[]; onExit: () => void; onDone?: (score: { good: number; bad: number }) => void }) {
   const gradeMistake = useApp((s) => s.gradeMistake);
   const playFrom = useApp((s) => s.playFrom);
   const showToast = useApp((s) => s.showToast);
@@ -271,6 +294,14 @@ function MistakeSession({ initial, onExit }: { initial: MistakeCard[]; onExit: (
   }, [index, card?.id]);
 
   useEffect(() => {
+    if (phase === 'done' && onDone) {
+      if (unsaved.current) {
+        unsaved.current = false;
+        void saveNow();
+      }
+      onDone(score);
+      return;
+    }
     if (phase !== 'done' || !unsaved.current) return;
     unsaved.current = false;
     setSaved('saving');
@@ -440,6 +471,7 @@ function MistakeSession({ initial, onExit }: { initial: MistakeCard[]; onExit: (
   };
 
   if (phase === 'done' || !card) {
+    if (onDone) return null;
     return (
       <div style={{ maxWidth: 560, margin: '40px auto' }} className="card card-pad stack">
         <h2>Session complete 🎉</h2>

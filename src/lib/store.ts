@@ -33,6 +33,8 @@ export interface Profile {
   aliases?: string[];
   /** The order of the player's repertoires on the Overview (ids); others follow in the order they were made. */
   repOrder?: string[];
+  /** How the player trains (new moves and mistake cards per session, whole lines); see today.ts. */
+  trainPrefs?: Partial<import('./today').TrainPrefs>;
   updatedAt?: number;
 }
 
@@ -77,6 +79,8 @@ interface UndoEntry {
   at?: number;
 }
 
+export type TrainDeck = 'today' | 'repertoire' | 'mistakes';
+
 export interface AppState {
   loaded: boolean;
   data: AppData;
@@ -92,8 +96,10 @@ export interface AppState {
   playSetup: { color?: Side; label?: string; level?: number } | null;
   /** The game open in the Games tab (null: the list). */
   openGameId: string | null;
-  /** Which deck the Train tab shows. */
-  trainDeck: 'repertoire' | 'mistakes';
+  /** What the Train tab shows: today's session for everything, one repertoire, or the mistake cards. */
+  trainDeck: TrainDeck;
+  /** Set by "Train" on the Overview: the Train tab starts today's session at once (then clears it). */
+  todayAutostart: boolean;
   /** Going through the results of a check one by one, from the Build board. */
   checkTour: CheckTour | null;
   undo: UndoEntry[];
@@ -129,7 +135,11 @@ export interface AppState {
   trainFrom(key: string | null): void;
   playFrom(line: PlayedMove[], setup?: { color?: Side; label?: string; level?: number }): void;
   openGame(id: string | null): void;
-  setTrainDeck(deck: 'repertoire' | 'mistakes'): void;
+  setTrainDeck(deck: TrainDeck): void;
+  /** Today's session, right away. */
+  trainToday(): void;
+  /** The Train tab took over the autostart. */
+  clearTodayAutostart(): void;
   /** Opens item `index` of a check's results on the Build board (null: stop). */
   tourTo(tour: CheckTour | null): void;
   /** Stores a repertoire's newest check results (not undoable: they describe the repertoire, they are not part of it). */
@@ -190,7 +200,8 @@ export const useApp = create<AppState>()((set, get) => {
     playStart: [],
     playSetup: null,
     openGameId: null,
-    trainDeck: 'repertoire',
+    trainDeck: 'today',
+    todayAutostart: false,
     checkTour: null,
     undo: [],
     redo: [],
@@ -369,7 +380,7 @@ export const useApp = create<AppState>()((set, get) => {
       set({ line, ply: line.length, view: 'build' });
     },
 
-    trainFrom: (key) => set({ trainScope: key && key !== ROOT ? key : null, view: 'train' }),
+    trainFrom: (key) => set({ trainScope: key && key !== ROOT ? key : null, view: 'train', trainDeck: 'repertoire' }),
 
     playFrom: (line, setup) => set({ playStart: line, playSetup: setup ?? null, view: 'play' }),
 
@@ -377,6 +388,8 @@ export const useApp = create<AppState>()((set, get) => {
     openGame: (id) => set(id ? { openGameId: id, view: id.includes('|practice:') ? 'play' : 'games' } : { openGameId: null }),
 
     setTrainDeck: (deck) => set({ trainDeck: deck }),
+    trainToday: () => set({ view: 'train', trainDeck: 'today', todayAutostart: true, trainScope: null }),
+    clearTodayAutostart: () => set({ todayAutostart: false }),
 
     tourTo: (tour) => set({ checkTour: tour }),
 

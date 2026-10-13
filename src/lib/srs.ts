@@ -22,6 +22,11 @@ function toStored(card: Card): SrsCard {
   };
 }
 
+/** A card you have missed this many times (after learning it) is a "leech", as Anki calls it: more of the same
+ *  reviews rarely help; a note, playing the position, or a simpler line does. */
+export const LEECH_LAPSES = 4;
+export const isLeech = (c: SrsCard | undefined) => !!c && c.lapses >= LEECH_LAPSES;
+
 export function newCard(now = Date.now()): SrsCard {
   return toStored(createEmptyCard(new Date(now)));
 }

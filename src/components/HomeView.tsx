@@ -9,6 +9,7 @@ import { useSync } from '../lib/sync';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { ImportPgnDialog } from './ImportPgnDialog';
+import { describePlan, useTodayPlan } from '../lib/today';
 import { Menu } from './Menu';
 
 /** In play (you play it now: your games are checked against it) or study (trained, but not checked against your games). */
@@ -122,8 +123,7 @@ export function HomeView() {
   const reps = reorder.order ? (reorder.order.map((id) => ordered.find((r) => r.id === id)).filter(Boolean) as Repertoire[]) : ordered;
 
   const summaries = useMemo(() => reps.map((r) => ({ rep: r, stats: stats(r), srs: counts(r) })), [reps]);
-  const totalDue = summaries.reduce((a, s) => a + s.srs.due, 0);
-  const totalNew = summaries.reduce((a, s) => a + s.srs.fresh, 0);
+  const plan = useTodayPlan();
 
   if (!profile) return null;
 
@@ -138,17 +138,16 @@ export function HomeView() {
         <div>
           <h2 style={{ fontSize: 22 }}>Hi {profile.name}</h2>
           <div className="muted">
-            {reps.length === 0
-              ? 'Create your first repertoire.'
-              : totalDue > 0
-                ? `You have ${totalDue} ${totalDue === 1 ? 'move' : 'moves'} to review today.`
-                : totalNew > 0
-                  ? `Nothing due — ${totalNew} new ${totalNew === 1 ? 'move' : 'moves'} to learn.`
-                  : 'All reviews done for today.'}
+            {reps.length === 0 ? 'Create your first repertoire.' : plan.total > 0 ? `Today: ${describePlan(plan)}.` : 'All done for today.'}
           </div>
         </div>
         <span className="spacer" />
-        <button className="btn primary" onClick={() => setCreating(true)}>
+        {plan.total > 0 && (
+          <button className="btn primary lg" onClick={() => useApp.getState().trainToday()} title="Today's session: all your repertoires and mistake cards">
+            <Icon name="train" size={18} /> Train ({plan.total})
+          </button>
+        )}
+        <button className={`btn ${plan.total > 0 ? '' : 'primary'}`} onClick={() => setCreating(true)}>
           <Icon name="plus" size={16} /> New repertoire
         </button>
       </div>

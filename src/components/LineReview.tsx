@@ -20,7 +20,20 @@ import { OpeningLabel } from './OpeningLabel';
  * that is not due only counts when you get it wrong. New moves are shown first; their lines come back at the end of
  * the session without help, and that is when they are graded.
  */
-export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoire; items: TrainItem[]; start: PathStep[]; onExit: () => void }) {
+export function LineReviewSession({
+  rep,
+  items,
+  start,
+  onExit,
+  onDone,
+}: {
+  rep: Repertoire;
+  items: TrainItem[];
+  start: PathStep[];
+  onExit: () => void;
+  /** Part of today's session: hand over the score when done instead of showing a summary. */
+  onDone?: (score: { good: number; bad: number }) => void;
+}) {
   const updateRep = useApp((s) => s.updateRep);
   const showToast = useApp((s) => s.showToast);
   const startKey = start.at(-1)?.to ?? ROOT;
@@ -241,8 +254,16 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
     [canHint, current],
   );
 
-  // Session finished: save right away and show the result.
+  // Session finished: save right away and show the result (or hand over to the next part of today's session).
   useEffect(() => {
+    if (phase === 'done' && onDone) {
+      if (unsaved.current) {
+        unsaved.current = false;
+        void saveNow();
+      }
+      onDone({ good: score.good, bad: score.bad });
+      return;
+    }
     if (phase !== 'done' || !unsaved.current) return;
     unsaved.current = false;
     setSaved('saving');
@@ -262,6 +283,7 @@ export function LineReviewSession({ rep, items, start, onExit }: { rep: Repertoi
   };
 
   if (phase === 'done') {
+    if (onDone) return null;
     const c = counts(rep);
     return (
       <div style={{ maxWidth: 560, margin: '40px auto' }} className="card card-pad stack">

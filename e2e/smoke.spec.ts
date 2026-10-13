@@ -22,14 +22,17 @@ test('a repertoire from a PGN: overview, build and tree', async ({ page }) => {
   await expect(page.locator('cg-board')).toBeVisible();
 });
 
-test('train: learn the new moves, then recall them', async ({ page }) => {
+test("train: today's session learns the new moves, then recalls them", async ({ page }) => {
   await start(page, { name: 'Open games', pgn: REP });
-  await go(page, 'Train');
-  await page.locator('.chip', { hasText: /^20$/ }).click();
-  await page.getByRole('button', { name: /Start review/ }).click();
+  await go(page, 'Overview');
+  // The same number on the Overview, the Train tab and its badge.
+  await expect(page.locator('main')).toContainText('Today: 3 new moves.');
+  await expect(page.locator('nav.nav button[title="Train"] .badge')).toHaveText('3');
+  await page.getByRole('button', { name: 'Train (3)' }).click();
+  await expect(page.locator('.today-bar')).toContainText('part 1 of 1 · Open games: new moves (3)');
   const feedback = page.locator('.feedback');
   const squares: Record<string, [string, string]> = { e4: ['e2', 'e4'], Nf3: ['g1', 'f3'], Bc4: ['f1', 'c4'] };
-  const done = page.getByText('Session complete');
+  const done = page.getByText('Today done');
   const ready = async () =>
     (await done.count()) > 0 || /New move: play|What do you play here|repertoire too/.test((await feedback.textContent().catch(() => '')) ?? '');
   for (let step = 0; step < 20; step++) {
@@ -54,8 +57,10 @@ test('train: learn the new moves, then recall them', async ({ page }) => {
     await page.waitForTimeout(400);
     if (await next.count()) await next.click();
   }
-  await expect(page.getByText('Session complete')).toBeVisible();
+  await expect(page.getByText('Today done')).toBeVisible();
   await expect(page.locator('.stat', { hasText: 'right first time' })).toContainText('3');
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page.locator('.today-card')).toContainText('Nothing to train right now');
 });
 
 test('a game: import, analysis without spoilers, find a better move', async ({ page }) => {
