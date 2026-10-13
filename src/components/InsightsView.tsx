@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { moveNo, PHASES, type Phase } from '../lib/analysis';
-import { lineFromSans } from '../lib/chess';
+import { PHASES, type Phase } from '../lib/analysis';
 import { formatDate, gameLabel, SPEED_NAMES, type GameSpeed, type PlayedGame } from '../lib/games';
 import {
   analysedFacts,
@@ -16,6 +15,8 @@ import {
 import { inPlay, type Repertoire } from '../lib/repertoire';
 import { ALL_IN_PLAY, scopedRepsBoth, useRepScope, useScopeOf } from '../lib/repScope';
 import { RepScopePicker } from './RepScopePicker';
+import { GameActions } from './GameActions';
+import type { Suggestion } from './GamesView';
 import { THEME_ADVICE, THEME_NAMES } from '../lib/themes';
 import { mistakeCounts } from '../lib/mistakes';
 import { useApp } from '../lib/store';
@@ -50,7 +51,7 @@ function readFilter(profileId: string): InsightFilter {
 }
 
 /** What your analysed games say together: where you lose points, and what to work on. */
-export function InsightsView({ games, profileId, suggestions, onChoose }: { games: PlayedGame[]; profileId: string; suggestions: number; onChoose: () => void }) {
+export function InsightsView({ games, profileId, suggestions: allSuggestions, onChoose }: { games: PlayedGame[]; profileId: string; suggestions: Suggestion[]; onChoose: () => void }) {
   const allReps = useApp((s) => s.data.repertoires);
   const reps = useMemo(() => allReps.filter((r) => r.profileId === profileId), [allReps, profileId]);
   const mistakes = useApp((s) => s.data.mistakes);
@@ -64,6 +65,12 @@ export function InsightsView({ games, profileId, suggestions, onChoose }: { game
   }, [filter, profileId]);
 
   const shown = useMemo(() => filterGames(games, filter), [games, filter]);
+  // The mistakes waiting for your choice, in the games of this selection.
+  const suggestionList = useMemo(() => {
+    const ids = new Set(shown.map((g) => g.id));
+    return allSuggestions.filter((s) => ids.has(s.game.id));
+  }, [shown, allSuggestions]);
+  const suggestions = suggestionList.length;
   // Your games are checked against the repertoires you play now, or the one you picked (also a study repertoire).
   const scope = useScopeOf(profileId);
   const checked = useMemo(() => scopedRepsBoth(reps, profileId, scope), [reps, profileId, scope]);
@@ -110,25 +117,15 @@ export function InsightsView({ games, profileId, suggestions, onChoose }: { game
         {i.analysed > 0 && i.analysed < 10 && ' With fewer than 10 games these numbers are a first impression, not a pattern.'}
       </div>
 
-      {i.analysed > 0 && (
-        <>
-          <Tiles i={i} />
-          <div className="insights-grid">
-            <div className="stack insights-col">
-              <PhaseCard i={i} />
-              <DecidedCard i={i} />
-            </div>
-            <div className="stack insights-col">
-              <MistakesCard i={i} />
-              <ThemesCard i={i} />
-              <TimeCard i={i} />
-              <TrendCard i={i} games={shown} />
-              <OpeningsCard i={i} />
-            </div>
-            <RepertoireCard games={shown} reps={reps} />
-          </div>
-        </>
-      )}
+      {/* What you can do first: your repertoire against your games, then the mistake cards; the statistics after. */}
+      <GameActions
+        games={shown}
+        profileId={profileId}
+        suggestions={suggestionList}
+        onChoose={onChoose}
+        empty={shown.length > 0 && <div className="small muted">Nothing to do from these games: no open deviations, no replies to prepare, no mistakes waiting.</div>}
+      />
+      {i.analysed > 0 && reps.length > 0 && <RepertoireCard games={shown} reps={reps} />}
 
       <div className="card card-pad row wrap">
         <Icon name="train" size={18} />
@@ -144,6 +141,26 @@ export function InsightsView({ games, profileId, suggestions, onChoose }: { game
         )}
         <TrainButton />
       </div>
+
+      {i.analysed > 0 && (
+        <>
+          <h3 className="insights-heading">Statistics</h3>
+          <Tiles i={i} />
+          <div className="insights-grid">
+            <div className="stack insights-col">
+              <PhaseCard i={i} />
+              <DecidedCard i={i} />
+            </div>
+            <div className="stack insights-col">
+              <MistakesCard i={i} />
+              <ThemesCard i={i} />
+              <TimeCard i={i} />
+              <TrendCard i={i} games={shown} />
+              <OpeningsCard i={i} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -642,69 +659,12 @@ function RepertoireCard({ games, reps }: { games: PlayedGame[]; reps: Repertoire
 }
 
 function PrepDetails({ p, name }: { p: PrepSummary; name: string }) {
-  const { openLine, openGame, setActiveRep } = useApp.getState();
-  // Open the position in Build, in the repertoire that has it.
-  const buildAt = (sans: string[], repId?: string) => {
-    const line = lineFromSans(sans);
-    if (!line) return;
-    if (repId) setActiveRep(repId);
-    openLine(line);
-  };
   if (!p.games) return <div className="small muted">None of these games started in {name}.</div>;
   return (
-    <>
-      <div className="small">
-        In {plural(p.games, 'game')}, {name} covered the start; the games followed it for <b>{p.bookMoves?.toFixed(1)}</b> moves on average.
-      </div>
-      <div className="prep-cols">
-        <div className="stack" style={{ gap: 6 }}>
-          <b className="small">Replies you have not prepared ({p.unprepared.length})</b>
-          {p.unprepared.length === 0 && <div className="small faint">None: your opponents stayed within your preparation.</div>}
-          {p.unprepared.slice(0, 8).map((u) => (
-            <div key={`${u.key}${u.played}`} className="prep-row">
-              <span className="small">
-                {lastMoves(u.line)} <b>{moveNo(u.ply)}{u.played}</b>
-                <span className="faint"> · {plural(u.count, 'game')}</span>
-              </span>
-              <button className="btn sm ghost" title="Open this position in Build to prepare an answer" onClick={() => buildAt([...u.line, u.played], u.repId)}>
-                <Icon name="board" size={14} /> Prepare
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="stack" style={{ gap: 6 }}>
-          <b className="small">Where you left it yourself ({p.youLeft.length})</b>
-          {p.youLeft.length === 0 && <div className="small faint">Never: you played your prepared moves.</div>}
-          {p.youLeft.slice(0, 8).map((y) => (
-            <div key={y.game.id} className="prep-row">
-              <span className="small">
-                <b>
-                  {moveNo(y.ply)}
-                  {y.played}
-                </b>{' '}
-                instead of {y.expected.join(' or ')}
-                <span className="faint"> · {gameLabel(y.game)}</span>
-              </span>
-              <button className="btn sm ghost" title="Open the game" onClick={() => openGame(y.game.id)}>
-                <Icon name="games" size={14} />
-              </button>
-              <button className="btn sm ghost" title="Open the position in Build" onClick={() => buildAt(y.game.moves.slice(0, y.ply), y.repId)}>
-                <Icon name="board" size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
+    <div className="small">
+      In {plural(p.games, 'game')}, {name} covered the start; the games followed it for <b>{p.bookMoves?.toFixed(1)}</b> moves on average.
+      {p.unprepared.length + p.youLeft.length > 0 && ' What to do about the rest is listed at the top of this page.'}
+    </div>
   );
 }
 
-/** "…2.Nc3" : the last two moves before a position, for a short label. */
-function lastMoves(line: string[]): string {
-  const start = Math.max(0, line.length - 3);
-  const parts = line.slice(start).map((san, k) => {
-    const ply = start + k;
-    return ply % 2 === 0 ? `${ply / 2 + 1}.${san}` : k === 0 ? `${Math.floor(ply / 2) + 1}…${san}` : san;
-  });
-  return (start > 0 ? '… ' : '') + parts.join(' ');
-}

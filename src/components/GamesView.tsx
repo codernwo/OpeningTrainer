@@ -14,6 +14,7 @@ import { GameReview } from './GameReview';
 import { Icon } from './Icon';
 import { fetchNewLichessGames, hasFetchedBefore, ImportGamesDialog } from './ImportGamesDialog';
 import { InsightsView } from './InsightsView';
+import { GameActions } from './GameActions';
 import { RatingDiff } from './RatingDiff';
 import { themesOf } from '../lib/themes';
 import { ThemeChips } from './ThemeChips';
@@ -139,17 +140,7 @@ function GamesList() {
           <>
             {(waiting > 0 || queue.error) && <AnalysisNotice waiting={waiting} current={current} />}
             <ClockUpdateNotice games={games} />
-            {tab === 'games' && suggestions.length > 0 && (
-              <div className="notice row wrap suggest-banner">
-                <Icon name="target" size={16} />
-                <span style={{ flex: 1 }}>
-                  <b>{plural(suggestions.length, 'mistake')}</b> from your games could become training cards.
-                </span>
-                <button className="btn sm primary" onClick={() => setChoosing(true)}>
-                  Choose cards
-                </button>
-              </div>
-            )}
+            {tab === 'games' && <GameActions games={games} profileId={profile.id} suggestions={suggestions} onChoose={() => setChoosing(true)} />}
             {tab === 'games' && speeds.length > 1 && (
               <div className="filter-row">
                 <span className={`chip ${speed === null ? 'on' : ''}`} onClick={() => setSpeed(null)}>
@@ -178,7 +169,7 @@ function GamesList() {
         )}
       </div>
       {games.length > 0 && tab === 'insights' && (
-        <InsightsView games={games} profileId={profile.id} suggestions={suggestions.length} onChoose={() => setChoosing(true)} />
+        <InsightsView games={games} profileId={profile.id} suggestions={suggestions} onChoose={() => setChoosing(true)} />
       )}
       {importing && <ImportGamesDialog profile={profile} onClose={() => setImporting(false)} />}
       {choosing && <ChooseCardsDialog suggestions={suggestions} onClose={() => setChoosing(false)} />}

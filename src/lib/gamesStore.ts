@@ -168,6 +168,9 @@ function mergeGame(l: PlayedGame, r: PlayedGame): PlayedGame {
   if (!merged.clocks && (l.clocks || r.clocks)) merged.clocks = l.clocks ?? r.clocks;
   if (analysis) merged.analysis = analysis;
   if (dismissed.length) merged.dismissed = dismissed;
+  // The later decision about leaving the repertoire wins, whichever side changed the game last.
+  const choice = [l.prepChoice, r.prepChoice].filter(Boolean).sort((a, b) => b!.at - a!.at)[0];
+  if (choice) merged.prepChoice = choice;
   return merged;
 }
 

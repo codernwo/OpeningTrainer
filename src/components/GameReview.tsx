@@ -24,6 +24,8 @@ import { positionKeys, prepCheck } from '../lib/insights';
 import { movesAt } from '../lib/repertoire';
 import { scopedReps, useScopeOf } from '../lib/repScope';
 import { RepScopePicker } from './RepScopePicker';
+import { DeviationButtons } from './GameActions';
+import { useGames as useGamesStore } from '../lib/gamesStore';
 import { THEME_HINT, themesOf } from '../lib/themes';
 import { isGoodToo } from '../lib/checkMove';
 import { OpeningLabel } from './OpeningLabel';
@@ -591,7 +593,24 @@ function OpeningCheck({ game }: { game: PlayedGame }) {
         You left your repertoire with <b>{moveNo(check.ply)}{check.played}</b>; it plays {check.expected.map((m) => `${moveNo(check.ply)}${m}`).join(' or ')}.
       </>
     );
-    action = build(check.ply, 'Open in Build', check.ply);
+    const d = { game, ply: check.ply, key: keys[check.ply], line: game.moves.slice(0, check.ply), played: check.played, expected: check.expected, repId: owner(check.ply).id };
+    const decided = game.prepChoice?.ply === check.ply ? game.prepChoice : undefined;
+    action = decided ? (
+      <div className="small muted row wrap" style={{ gap: 6 }}>
+        <span>
+          {decided.choice === 'forgot' ? `Marked as forgotten: ${check.expected.join(' / ')} came back in your training.` : 'Marked as played on purpose.'}
+        </span>
+        <button className="btn sm ghost" onClick={() => useGamesStore.getState().updateGame(game.id, (g) => ({ ...g, prepChoice: undefined }))}>
+          Change
+        </button>
+        {build(check.ply, 'Open in Build', check.ply)}
+      </div>
+    ) : (
+      <div className="stack" style={{ gap: 4 }}>
+        <span className="small muted">Did you forget it, or play another move on purpose?</span>
+        <DeviationButtons d={d} />
+      </div>
+    );
   } else if (check.kind === 'opponent-left') {
     text = (
       <>

@@ -58,8 +58,10 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
           </dd>
           <dt>Train</dt>
           <dd>
-            Spaced repetition: every move you play is a card that comes back just before you would forget it, each card
-            asking for its own move. New moves come with the comments around them; when you find a move the session goes
+            One session a day for everything: the reviews of all your repertoires, your mistake cards and some new moves, with
+            the same number on the Overview and in the session. Spaced repetition: every move you play is a card that comes
+            back just before you would forget it, each card asking for its own move. Moves you keep missing get a different
+            approach: a note, playing the position, or a simpler line. New moves come with the comments around them; when you find a move the session goes
             straight on, and its comment stays in view on the next card. For a wide repertoire, train up to an early move first and go deeper step by
             step. Practice lines meet the replies as often as people really play them.
           </dd>
@@ -72,8 +74,9 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
           </dd>
           <dt>Games</dt>
           <dd>
-            The games you played, from Lichess or a PGN file, analysed on your device: where it left your repertoire, where it
-            went wrong and whether players at your level find the better move. You look for it yourself first, with a hint if
+            The games you played, from Lichess or a PGN file, analysed on your device: where it left your repertoire (forgotten,
+            on purpose, or time to change it), which replies you still need to prepare, where it went wrong and whether players
+            at your level find the better move. You look for it yourself first, with a hint if
             you want one, before the answer is shown. The mistakes you pick become a deck of their own in Train, and Insights shows
             what all your games say together: your weakest phase, the tactical themes and the clock behind your mistakes, and the
             replies your repertoires in play still lack.

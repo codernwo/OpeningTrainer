@@ -44,6 +44,9 @@ export interface PlayedGame {
   clocks?: (number | null)[];
   /** Mistakes (by half-move index) you chose not to train, so they are not suggested again. */
   dismissed?: number[];
+  /** What you decided about the move where you left your repertoire in this game (half-move index): forgotten (the
+   *  card was made due) or played on purpose. Asked once per game. */
+  prepChoice?: { ply: number; choice: 'forgot' | 'deliberate'; at: number };
   /** Practice games started from a position (Play from here): the moves before this half-move were given, not
    *  played, so the analysis looks for mistakes only after it. */
   startPly?: number;

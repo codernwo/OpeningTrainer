@@ -3186,3 +3186,14 @@ details.advanced > summary {
   flex-wrap: wrap;
   gap: 6px;
 }
+
+/* What your games ask of you. */
+.game-actions .action-row {
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.insights-heading {
+  margin-top: 8px;
+}
