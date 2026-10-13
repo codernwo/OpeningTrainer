@@ -107,7 +107,7 @@ test('play: a move against Maia', async ({ page }, info) => {
   await page.waitForTimeout(500);
   await move(page, 'e2', 'e4');
   // Maia answers: the move list has a reply for Black.
-  await expect(page.locator('div[style*="max-height: 220px"] b')).toHaveCount(2, { timeout: 60_000 });
+  await expect(page.locator('.move-list b')).toHaveCount(2, { timeout: 60_000 });
 });
 
 test('no screen is wider than the window', async ({ page }) => {
