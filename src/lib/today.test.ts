@@ -39,7 +39,7 @@ const card = (key: string, extra: Partial<MistakeCard> = {}): MistakeCard => ({
 describe("today's plan", () => {
   const white = learned(rep('White', 'white', ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5']), 1000); // 3 own moves, all learned
   const black = rep('Black', 'black', ['e4', 'c5', 'Nf3', 'd6'], ['d4', 'Nf6']); // 3 own moves, all new
-  const prefs = { newMoves: 2, newMistakes: 1, wholeLines: false };
+  const prefs = { newMoves: 2, newMistakes: 1, wholeLines: false, withMistakes: true };
 
   it('reviews of every repertoire first, then mistake cards, then new moves up to the limit', () => {
     const cards = [card(START_KEY), card('other', { card: gradeCard(newCard(1000), Rating.Good, 1000), createdAt: 900 })];
@@ -66,6 +66,14 @@ describe("today's plan", () => {
     expect(plan.total).toBe(4);
   });
 
+  it('leaves the mistake cards out when you choose so', () => {
+    const cards = [card(START_KEY)];
+    const plan = todayPlan([white], cards, { ...prefs, withMistakes: false }, later);
+    expect(plan.parts.map((p) => p.kind)).toEqual(['review']);
+    expect(plan.mistakes).toBe(0);
+    expect(plan.total).toBe(3);
+  });
+
   it('is empty when there is nothing to do', () => {
     const plan = todayPlan([learned(black, Date.now())], [], { ...prefs, newMoves: 0 }, Date.now());
     expect(plan).toMatchObject({ parts: [], total: 0 });
@@ -73,7 +81,7 @@ describe("today's plan", () => {
   });
 
   it('takes the synced choices over the device ones', () => {
-    expect(trainPrefs({ trainPrefs: { newMoves: 20, wholeLines: true } })).toMatchObject({ newMoves: 20, wholeLines: true, newMistakes: 10 });
+    expect(trainPrefs({ trainPrefs: { newMoves: 20, wholeLines: true } })).toMatchObject({ newMoves: 20, wholeLines: true, newMistakes: 10, withMistakes: true });
   });
 });
 

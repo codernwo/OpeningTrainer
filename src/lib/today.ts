@@ -14,6 +14,8 @@ export interface TrainPrefs {
   newMoves: number;
   /** New mistake cards per session. */
   newMistakes: number;
+  /** Your mistake cards are part of today's session (off: only your repertoires). */
+  withMistakes: boolean;
   /** Review in whole lines instead of single cards. */
   wholeLines: boolean;
 }
@@ -34,6 +36,7 @@ export function trainPrefs(profile: Pick<Profile, 'trainPrefs'> | null | undefin
   const local: TrainPrefs = {
     newMoves: Number(stored('new-limit') ?? 10),
     newMistakes: Number(stored('new-limit-mistakes') ?? 10),
+    withMistakes: true,
     wholeLines: stored('train-whole-lines') === '1',
   };
   return { ...local, ...profile?.trainPrefs };
@@ -67,7 +70,7 @@ export function todayPlan(reps: readonly Repertoire[], mistakes: readonly Mistak
       due += items.length;
     }
   }
-  const cards = mistakeQueue([...mistakes], prefs.newMistakes, now);
+  const cards = prefs.withMistakes ? mistakeQueue([...mistakes], prefs.newMistakes, now) : [];
   if (cards.length) parts.push({ kind: 'mistakes', cards, due: cards.filter((c) => c.card.state !== State.New).length });
   let left = prefs.newMoves;
   let fresh = 0;

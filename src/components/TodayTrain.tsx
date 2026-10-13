@@ -55,6 +55,8 @@ export function SessionSettings({ mistakes = true }: { mistakes?: boolean }) {
 /** The Train tab's first page: one button for today's session over everything. */
 export function TodayTrain() {
   const plan = useTodayPlan();
+  const [prefs, setPrefs] = useTrainPrefs();
+  const myCards = useApp((s) => (s.data.mistakes ?? []).some((m) => m.profileId === s.data.activeProfileId));
   const data = useApp((s) => s.data);
   const autostart = useApp((s) => s.todayAutostart);
   const [session, setSession] = useState<TodayPlan | null>(null);
@@ -126,12 +128,19 @@ export function TodayTrain() {
             )}
           </ul>
         )}
+        {myCards && (
+          <label className="row small" style={{ gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={prefs.withMistakes} onChange={(e) => setPrefs({ withMistakes: e.target.checked })} />
+            Include my mistake cards
+            {!prefs.withMistakes && <span className="faint">(train them on their own tab)</span>}
+          </label>
+        )}
         {paused.length > 0 && (
           <div className="small faint">
             Paused, so left out: {paused.map((r) => r.name).join(', ')}.
           </div>
         )}
-        {settings && <SessionSettings />}
+        {settings && <SessionSettings mistakes={prefs.withMistakes} />}
       </div>
       <details className="card card-pad help">
         <summary>
