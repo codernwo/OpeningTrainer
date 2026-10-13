@@ -447,7 +447,7 @@ export function SyncBadge() {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
-/** Sound for moves and games: one of the free Lichess sound sets, or none. Per device. */
+/** Sound for moves and games: the free SFX set from Lichess, or none. Per device. */
 function SoundCard() {
   const [set, setSet] = useState<SoundSet>(soundSet);
   const names = useOpeningNames((s) => s.on);
@@ -480,7 +480,7 @@ function SoundCard() {
         </div>
         <div className="help">
           Moves, captures and checks while you play and train, the start and end of a practice game, and a warning when
-          your clock runs low. The sounds were made by Enigmahack for Lichess (AGPL-3.0); Lichess' own default sounds are
+          your clock runs low. The sounds (the SFX set) were made by Enigmahack for Lichess (AGPL-3.0); Lichess' own default sounds are
           not free to reuse, so they are not here. This choice is kept on this device.
         </div>
         <label className="row" style={{ gap: 6, cursor: 'pointer' }}>

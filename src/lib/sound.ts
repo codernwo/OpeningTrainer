@@ -1,12 +1,13 @@
-// Sounds for moves and games: the free sound sets Enigmahack made for Lichess (AGPL-3.0-or-later; see
-// public/sounds/README.md). Chosen in Settings, remembered per device; off is an option.
+// Sounds for moves and games: the free SFX sound set Enigmahack made for Lichess (AGPL-3.0-or-later; see
+// public/sounds/README.md). On or off in Settings, remembered per device
+// (a set chosen earlier that is no longer here falls back to SFX).
 import type { PlayedMove } from './chess';
 
-export const SOUND_SETS = ['sfx', 'piano', 'nes', 'futuristic'] as const;
+export const SOUND_SETS = ['sfx'] as const;
 export type SoundSet = (typeof SOUND_SETS)[number] | 'off';
 export type SoundName = 'Move' | 'Capture' | 'Check' | 'GenericNotify' | 'LowTime' | 'Victory' | 'Defeat' | 'Draw';
 
-export const SOUND_SET_NAMES: Record<SoundSet, string> = { sfx: 'SFX', piano: 'Piano', nes: 'NES', futuristic: 'Futuristic', off: 'Off' };
+export const SOUND_SET_NAMES: Record<SoundSet, string> = { sfx: 'SFX', off: 'Off' };
 
 const KEY = 'sound-set';
 
