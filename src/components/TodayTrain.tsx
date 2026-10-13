@@ -89,7 +89,7 @@ export function TodayTrain() {
         <div className="row">
           <h2>Today</h2>
           <span className="spacer" />
-          <button className={`btn sm ghost ${settings ? 'on' : ''}`} aria-expanded={settings} onClick={() => setSettings((x) => !x)} title="Session settings">
+          <button className="btn sm ghost" aria-pressed={settings} aria-expanded={settings} onClick={() => setSettings((x) => !x)} title="Session settings">
             <Icon name="settings" size={15} /> Settings
           </button>
         </div>
