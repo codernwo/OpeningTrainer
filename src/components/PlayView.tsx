@@ -1318,11 +1318,12 @@ function MoveList({ moves, sources }: { moves: PlayedMove[]; sources: Source[] }
     const el = box.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [moves.length]);
-  if (!moves.length) return <div className="small faint">No moves yet.</div>;
+  if (!moves.length) return <div className="small faint" style={{ height: 116 }}>No moves yet.</div>;
   const tag = (s: Source) =>
     s === 'repertoire' ? <span className="badge mine">book</span> : s === 'database' ? <span className="badge accent">db</span> : s === 'maia' ? <span className="badge">maia</span> : null;
   return (
-    <div ref={box} style={{ maxHeight: 220, overflow: 'auto', lineHeight: 2 }}>
+    // A fixed height: the panel does not grow (and push what is below it) as the game goes on.
+    <div ref={box} style={{ height: 116, overflow: 'auto', lineHeight: 2 }}>
       {moves.map((m, i) => (
         // inline-block: the list wraps between moves (nowrap spans without spaces would make one endless line).
         <span key={i} style={{ display: 'inline-block', marginRight: 6, whiteSpace: 'nowrap', opacity: sources[i] === 'start' ? 0.6 : 1 }}>

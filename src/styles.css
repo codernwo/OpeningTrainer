@@ -2737,7 +2737,8 @@ a.btn {
 }
 
 .board-col.with-bars {
-  --board: min(calc(100vh - 290px), calc(100vw - 560px), 680px);
+  /* As big as the window allows, with a clock bar above and below it (measured: the board starts 117 px down). */
+  --board: min(calc(100vh - 180px), calc(100vw - 560px), 760px);
 }
 
 .clock-bar {

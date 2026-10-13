@@ -89,6 +89,10 @@ export function Board({ position, orientation, movable, lastMove, shapes, drawn,
     if (!board) return;
     const down = (e: MouseEvent | TouchEvent) => {
       drawing.current = 'button' in e && (e.button === 2 || e.buttons === 2 || e.shiftKey);
+      // Chessground remembers where the board is and only measures again after a resize or a scroll. When something
+      // above the board appears or goes (a clock bar, captured pieces, a notice), clicks would land a square off:
+      // measure again at every press.
+      api.current?.state.dom.bounds.clear();
     };
     const up = () => {
       setTimeout(() => {
