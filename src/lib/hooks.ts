@@ -82,3 +82,11 @@ export function useKey(handler: (e: KeyboardEvent) => void, deps: unknown[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
+
+/** A screen that replaces another (a training session, a game review) starts at the top: otherwise, after scrolling
+ *  down to a button, the new screen opens with its board scrolled out of view. */
+export function useScrollToTop() {
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, []);
+}

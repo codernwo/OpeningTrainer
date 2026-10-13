@@ -3197,3 +3197,24 @@ details.advanced > summary {
 .insights-heading {
   margin-top: 8px;
 }
+
+/* Training panels keep their shape from move to move: the line on one line, a place for the opening name, a feedback
+   box of two lines; what varies in length (comments, notes, help with a hard card) comes last, under the buttons. */
+.train-context {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.train .feedback {
+  min-height: 74px;
+}
+
+/* One column (phone): the panel under the board never makes the page shorter, so the browser has no reason to scroll
+   the board when a comment disappears. */
+@media (max-width: 900px) {
+  .train-panel {
+    min-height: 560px;
+    width: 100%;
+  }
+}

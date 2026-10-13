@@ -17,7 +17,7 @@ import { lichessAnalysisUrl, moveFromBoard, playSan, playUci, sanToUci, START_KE
 import { formatClock, formatDate, gameLabel, gameLine, moveTime, opponentOf, SPEED_NAMES, type PlayedGame } from '../lib/games';
 import { useGames, useRatings } from '../lib/gamesStore';
 import { CATEGORY_NAMES, showRating } from '../lib/rating';
-import { useKey } from '../lib/hooks';
+import { useKey, useScrollToTop } from '../lib/hooks';
 import { cardFromMoment, mistakeId } from '../lib/mistakes';
 import { useApp } from '../lib/store';
 import { positionKeys, prepCheck } from '../lib/insights';
@@ -54,6 +54,7 @@ const engineArrow = (uci: string): Shape => {
 
 export function GameReview({ game }: { game: PlayedGame }) {
   const { openGame, openLine, playFrom, addMistakes, deleteMistakes, restoreMistakes, showToast } = useApp.getState();
+  useScrollToTop();
   const mistakes = useApp((s) => s.data.mistakes);
   const hasRep = useApp((s) => s.data.repertoires.some((r) => r.profileId === game.profileId));
   const profile = useApp((s) => s.data.profiles.find((p) => p.id === game.profileId));

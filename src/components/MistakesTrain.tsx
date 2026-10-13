@@ -12,7 +12,7 @@ import { useTrainPrefs } from './TodayTrain';
 import { THEME_ADVICE, THEME_NAMES } from '../lib/themes';
 import { saveNow, type SaveResult } from '../lib/sync';
 import { shuffle } from '../lib/random';
-import { useKey } from '../lib/hooks';
+import { useKey, useScrollToTop } from '../lib/hooks';
 import { Board, sideCircle, type Shape } from './Board';
 import { Icon } from './Icon';
 import { SavedNote, saveMessage } from './SaveIndicator';
@@ -232,6 +232,7 @@ function CardList({ cards }: { cards: MistakeCard[] }) {
 /** Training the mistake cards. With `onDone` (a part of today's session) it hands over its score when the cards run
  *  out instead of showing its own summary. */
 export function MistakeSession({ initial, onExit, onDone }: { initial: MistakeCard[]; onExit: () => void; onDone?: (score: { good: number; bad: number }) => void }) {
+  useScrollToTop();
   const gradeMistake = useApp((s) => s.gradeMistake);
   const playFrom = useApp((s) => s.playFrom);
   const showToast = useApp((s) => s.showToast);
@@ -510,7 +511,7 @@ export function MistakeSession({ initial, onExit, onDone }: { initial: MistakeCa
           onMove={onMove}
         />
       </div>
-      <div className="stack">
+      <div className="stack train-panel">
         <div className="card card-pad stack">
           <div className="row">
             <span className="big-count">{queue.length - index}</span>
@@ -522,7 +523,7 @@ export function MistakeSession({ initial, onExit, onDone }: { initial: MistakeCa
           <div className="progress">
             <div style={{ width: `${(index / Math.max(1, queue.length)) * 100}%` }} />
           </div>
-          <div className="small muted">
+          <div className="small muted train-context">
             {card.games[0]?.label}
             {card.games.length > 1 ? ` and ${plural(card.games.length - 1, 'other game')}` : ''}
           </div>
@@ -573,19 +574,6 @@ export function MistakeSession({ initial, onExit, onDone }: { initial: MistakeCa
               </>
             )}
           </div>
-          {finished && (
-            <div className="stack" style={{ gap: 4 }}>
-              <ThemeChips themes={cardThemes(card)} />
-              {explainCard(card).map((t, i) => (
-                <div key={i} className="small">
-                  {t}
-                </div>
-              ))}
-              <div className="small muted">
-                Engine line: {no} {card.answer.join(' ')} ({formatEval(card.bestEval)})
-              </div>
-            </div>
-          )}
           <div className="row wrap">
             {!finished ? (
               <>
@@ -612,6 +600,20 @@ export function MistakeSession({ initial, onExit, onDone }: { initial: MistakeCa
             </button>
           </div>
           <PositionLinks line={path} positionKey={card.key} orientation={card.side} build={hasRep} />
+          {/* The explanation comes last, so the buttons stay where they are. */}
+          {finished && (
+            <div className="stack" style={{ gap: 4 }}>
+              <ThemeChips themes={cardThemes(card)} />
+              {explainCard(card).map((t, i) => (
+                <div key={i} className="small">
+                  {t}
+                </div>
+              ))}
+              <div className="small muted">
+                Engine line: {no} {card.answer.join(' ')} ({formatEval(card.bestEval)})
+              </div>
+            </div>
+          )}
         </div>
         <div className="help">
           A hint (which piece) counts as “hard”, a wrong move or “show the move” as “again”. Missed cards come back at the end of the session.

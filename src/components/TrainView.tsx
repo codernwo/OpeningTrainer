@@ -23,7 +23,7 @@ import { gamesOf, useGames } from '../lib/gamesStore';
 import { pickReply, replyCounts, type ReplySource } from '../lib/practiceReply';
 import { saveNow, type SaveResult } from '../lib/sync';
 import { playMoveSound } from '../lib/sound';
-import { useKey } from '../lib/hooks';
+import { useKey, useScrollToTop } from '../lib/hooks';
 import { moveNo } from '../lib/analysis';
 import { tokensToShapes } from '../lib/shapes';
 import { Board, moveArrow, sideCircle, type Shape } from './Board';
@@ -390,6 +390,7 @@ export interface SessionScore {
 /** A card review. With `onDone` (a part of today's session) it hands over its score when the cards run out instead of
  *  showing its own summary. */
 export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoire; initial: QItem[]; onExit: () => void; onDone?: (score: SessionScore) => void }) {
+  useScrollToTop();
   const updateRep = useApp((s) => s.updateRep);
   const showToast = useApp((s) => s.showToast);
   const [saved, setSaved] = useState<SaveResult | 'saving' | null>(null);
@@ -410,6 +411,8 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
   // What the author wrote at the card you just found: it goes along to the next card until you answer that one, so
   // there is time to read it without a stop.
   const [carried, setCarried] = useState<Words[] | null>(null);
+  // What the author wrote around the current card, shown under the buttons (so the buttons never move).
+  const [words, setWords] = useState<(Words | undefined)[]>([]);
   // Missed this card often: the number of times, to offer another way than more reviews.
   const [leech, setLeech] = useState(0);
   // Looking back through the line with the arrow keys: the ply shown, or null for the position of the card.
@@ -476,6 +479,7 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
     setPeek(null);
     setLeech(0);
     setMessage(null);
+    setWords([]);
     setShapes([]);
     const last = path.at(-1);
     setPos(last ? last.from : ROOT);
@@ -493,9 +497,9 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
         setMessage(
           <>
             New move: play <b>{item.san}</b>
-            <AuthorText words={[w.theirs, w.note, w.mine]} />
           </>,
         );
+        setWords([w.theirs, w.note, w.mine]);
       }
     }, last ? 450 : 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -570,12 +574,8 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
         info = `Correct! Next review in ${formatInterval(due - Date.now())}.`;
       }
       const w = authorWords(rep, item, path);
-      setMessage(
-        <>
-          {info}
-          <AuthorText words={[w.note, w.mine]} />
-        </>,
-      );
+      setMessage(info);
+      setWords([w.note, w.mine]);
       // Found it: on to the next card, taking the author's words along (a new move showed them already). After a
       // mistake the session waits.
       if (mistake) setWaiting(true);
@@ -658,7 +658,6 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
     );
   }
 
-  const context = formatLine(path.map((p) => p.san));
   const peeking = peek !== null;
   return (
     <div className="train">
@@ -674,7 +673,7 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
           onMove={onMove}
         />
       </div>
-      <div className="stack">
+      <div className="stack train-panel">
         <div className="card card-pad stack">
           <div className="row">
             <span className="big-count">{queue.length - index}</span>
@@ -686,8 +685,8 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
           <div className="progress">
             <div style={{ width: `${(index / Math.max(1, queue.length)) * 100}%` }} />
           </div>
-          <div className="small muted">{context || 'Starting position'}</div>
-          <OpeningLabel keys={path.map((p) => p.to)} />
+          <div className="small muted train-context">{tailOf(path.map((p) => p.san)) || 'Starting position'}</div>
+          <OpeningLabel keys={path.map((p) => p.to)} reserve />
           <div className={`feedback ${phase === 'good' ? 'good' : phase === 'bad' || (mistake && phase !== 'also') ? 'bad' : 'info'}`}>
             {peeking ? (
               <>
@@ -697,13 +696,6 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
               (message ?? (item.kind === 'retry' ? 'Once more: what do you play here?' : 'What do you play here?'))
             )}
           </div>
-          {leech > 0 && !peeking && <LeechHelp rep={rep} item={item} path={path} lapses={leech} />}
-          {carried && !peeking && phase !== 'good' && (
-            <div className="carried">
-              <span className="small faint">From the last card</span>
-              <AuthorText words={carried} />
-            </div>
-          )}
           <div className="row">
             {waiting ? (
               <button className="btn primary" onClick={proceed}>
@@ -720,6 +712,15 @@ export function ReviewSession({ rep, initial, onExit, onDone }: { rep: Repertoir
             </button>
           </div>
           <PositionLinks line={path} positionKey={item.from} orientation={rep.side} />
+          {/* Everything that varies in length comes last, so nothing above it moves. */}
+          {leech > 0 && !peeking && <LeechHelp rep={rep} item={item} path={path} lapses={leech} />}
+          {!peeking && <AuthorText words={words} />}
+          {carried && !peeking && phase !== 'good' && (
+            <div className="carried">
+              <span className="small faint">From the last card</span>
+              <AuthorText words={carried} />
+            </div>
+          )}
         </div>
         <div className="help">
           A hint (which piece) counts as “hard”, a wrong move as “again”. Another of your moves does not count: each card asks
@@ -811,6 +812,12 @@ export function PositionLinks({ line, positionKey, orientation, build = true }: 
   );
 }
 
+/** The last moves of a line ("… 7.Bb3 d6 8.c3"), so it fits on one line and the panel keeps its height. */
+export function tailOf(sans: readonly string[], keep = 8): string {
+  const start = Math.max(0, sans.length - keep);
+  return (start ? '… ' : '') + formatLine(sans.slice(start), start);
+}
+
 function comment(rep: Repertoire, item: TrainItem): string | undefined {
   return movesAt(rep, item.from).find((m) => m.uci === item.uci)?.comment;
 }
@@ -852,6 +859,7 @@ export function AuthorText({ words }: { words: (Words | undefined)[] }) {
 /** Ungraded practice: plays prepared opponent moves, as often as people play them; you answer with your repertoire
  *  until the line ends. */
 function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: PathStep[]; depth?: number; onExit: () => void }) {
+  useScrollToTop();
   const profile = useApp(activeProfile);
   const gamesData = useGames((s) => s.data);
   // Counted once per session: what your opponents played against this colour in your games.
@@ -980,7 +988,7 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
           onMove={onMove}
         />
       </div>
-      <div className="stack">
+      <div className="stack train-panel">
         <div className="card card-pad stack">
           <div className="row">
             <h2>Practice lines</h2>
@@ -989,10 +997,9 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
             <span className="badge mine">{stats.good} right</span>
             <span className="badge gap">{stats.bad} wrong</span>
           </div>
-          <div className="small muted">{formatLine(line) || 'Starting position'}</div>
-          <OpeningLabel keys={(lineFromSans(line) ?? []).map((m) => m.to)} />
+          <div className="small muted train-context">{tailOf(line) || 'Starting position'}</div>
+          <OpeningLabel keys={(lineFromSans(line) ?? []).map((m) => m.to)} reserve />
           <div className="feedback info">{message ?? (isMine(rep, pos) ? (movesAt(rep, pos).length ? 'Your move.' : 'Nothing prepared here.') : 'Opponent is thinking…')}</div>
-          {said && <AuthorText words={[said]} />}
           {source && (
             <div className="small faint">
               The opponent picks from your prepared replies{' '}
@@ -1014,6 +1021,7 @@ function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: P
             </button>
           </div>
           <PositionLinks line={lineFromSans(line) ?? []} positionKey={pos} orientation={rep.side} />
+          {said && <AuthorText words={[said]} />}
         </div>
       </div>
     </div>

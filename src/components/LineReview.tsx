@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { formatLine, lineFromSans, moveFromBoard, uciToArrow } from '../lib/chess';
+import { lineFromSans, moveFromBoard, uciToArrow } from '../lib/chess';
 import { planLine, type PlannedMove } from '../lib/linePlan';
 import { edgeId, inTrainDepth, movesAt, myEdgesInOrder, ROOT, type PathStep, type Repertoire } from '../lib/repertoire';
 import { counts, gradeCard, Rating, State, type TrainItem } from '../lib/srs';
@@ -9,8 +9,8 @@ import { playMoveSound } from '../lib/sound';
 import { Board, moveArrow, sideCircle, type Shape } from './Board';
 import { Icon } from './Icon';
 import { SavedNote, saveMessage } from './SaveIndicator';
-import { AuthorText, PositionLinks, useFlash } from './TrainView';
-import { useKey } from '../lib/hooks';
+import { AuthorText, PositionLinks, tailOf, useFlash } from './TrainView';
+import { useKey, useScrollToTop } from '../lib/hooks';
 import { moveNo } from '../lib/analysis';
 import { OpeningLabel } from './OpeningLabel';
 
@@ -34,6 +34,7 @@ export function LineReviewSession({
   /** Part of today's session: hand over the score when done instead of showing a summary. */
   onDone?: (score: { good: number; bad: number }) => void;
 }) {
+  useScrollToTop();
   const updateRep = useApp((s) => s.updateRep);
   const showToast = useApp((s) => s.showToast);
   const startKey = start.at(-1)?.to ?? ROOT;
@@ -57,6 +58,8 @@ export function LineReviewSession({
   const [message, setMessage] = useState<React.ReactNode>(null);
   // The comment on the move you just played.
   const [said, setSaid] = useState<{ label: string; text: string } | null>(null);
+  // What the author wrote around a move being taught.
+  const [teachWords, setTeachWords] = useState<({ label: string; text: string } | undefined)[]>([]);
   const [missed, setMissed] = useState(false);
   const [hinted, setHinted] = useState(false);
   const [score, setScore] = useState({ lines: 0, good: 0, bad: 0 });
@@ -149,15 +152,13 @@ export function LineReviewSession({
       setMessage(
         <>
           New move: play <b>{m.san}</b>
-          <AuthorText
-            words={[
+        </>,
+      );
+      setTeachWords([
               theirs && prev ? { label: `${moveNo(ply - 1)}${prev.san}`, text: theirs } : undefined,
               note ? { label: 'Note', text: note } : undefined,
               mine ? { label: `${moveNo(ply)}${m.san}`, text: mine } : undefined,
-            ]}
-          />
-        </>,
-      );
+            ]);
     } else setShapes([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineNo, i]);
@@ -331,7 +332,7 @@ export function LineReviewSession({
           onMove={onMove}
         />
       </div>
-      <div className="stack">
+      <div className="stack train-panel">
         <div className="card card-pad stack">
           <div className="row">
             <span className="big-count">{left}</span>
@@ -341,12 +342,11 @@ export function LineReviewSession({
             <span className="badge mine">{score.good} right</span>
             <span className="badge gap">{score.bad} wrong</span>
           </div>
-          <div className="small muted">{formatLine(played) || 'Starting position'}</div>
-          <OpeningLabel keys={(lineFromSans(played) ?? []).map((m) => m.to)} />
+          <div className="small muted train-context">{tailOf(played) || 'Starting position'}</div>
+          <OpeningLabel keys={(lineFromSans(played) ?? []).map((m) => m.to)} reserve />
           <div className={`feedback ${missed ? 'bad' : 'info'}`}>
             {message ?? (phase === 'await' ? 'Your move.' : 'Opponent is thinking…')}
           </div>
-          {said && !teaching && <AuthorText words={[said]} />}
           <div className="row">
             <button className="btn" onClick={hint} disabled={!canHint}>
               <Icon name="hint" size={16} /> Hint
@@ -357,6 +357,8 @@ export function LineReviewSession({
             </button>
           </div>
           <PositionLinks line={lineFromSans(played) ?? []} positionKey={pos} orientation={rep.side} />
+          {/* Comments come last, so nothing above them moves. */}
+          {teaching ? <AuthorText words={teachWords} /> : said && <AuthorText words={[said]} />}
         </div>
         <div className="help">
           You play every one of your moves in the line; the opponent’s are played for you. Moves that are due count as in

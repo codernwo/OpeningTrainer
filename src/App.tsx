@@ -48,6 +48,11 @@ export function App() {
     [],
   );
 
+  // Another screen starts at its top, not where the previous one was scrolled to.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [view]);
+
   // #about opens the About page, so it can be linked to; the address follows while it is open.
   useEffect(() => {
     const fromHash = () => {
