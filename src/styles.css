@@ -3219,3 +3219,9 @@ details.advanced > summary {
     width: 100%;
   }
 }
+
+/* Always keep the scrollbar's room (on Windows it takes 15 px): otherwise, when a page grows past the window (a comment,
+   Settings opened) the scrollbar appears, everything narrows and the board shifts and shrinks — and back again. */
+html {
+  scrollbar-gutter: stable;
+}
