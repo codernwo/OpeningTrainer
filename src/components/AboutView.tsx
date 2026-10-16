@@ -63,7 +63,7 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
             back just before you would forget it, each card asking for its own move. Moves you keep missing get a different
             approach: a note, playing the position, or a simpler line. New moves come with the comments around them; when you find a move the session goes
             straight on, and its comment stays in view on the next card. For a wide repertoire, train up to an early move first and go deeper step by
-            step. Practice lines meet the replies as often as people really play them.
+            step. Practice all lines plays every line to its end, the most played first, without touching your cards.
           </dd>
           <dt>Play</dt>
           <dd>

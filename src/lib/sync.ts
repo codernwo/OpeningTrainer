@@ -148,7 +148,9 @@ export function classify(a: AppData, b: AppData): 'none' | 'training' | 'edit' {
       x.side !== y.side ||
       !!x.study !== !!y.study ||
       x.trainDepth !== y.trainDepth ||
-      !!x.paused !== !!y.paused
+      !!x.paused !== !!y.paused ||
+      x.newMoves !== y.newMoves ||
+      x.wholeLines !== y.wholeLines
     ) {
       return 'edit';
     }

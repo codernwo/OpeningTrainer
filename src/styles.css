@@ -3244,3 +3244,14 @@ html {
   display: inline-block;
   min-width: 4.6em;
 }
+
+/* The repertoire tab's two ways in: Train (cards) and Practice all lines (no cards), each with one line saying which. */
+.train-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.train-choices .btn {
+  align-self: flex-start;
+}

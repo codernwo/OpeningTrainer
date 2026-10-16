@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { counts } from '../lib/srs';
 import { activeProfile, orderedReps, useApp } from '../lib/store';
 import { saveNow, type SaveResult } from '../lib/sync';
-import { describePlan, NEW_MISTAKE_CHOICES, NEW_MOVE_CHOICES, todayPlan, trainPrefs, useTodayPlan, type TodayPart, type TodayPlan, type TrainPrefs } from '../lib/today';
+import { setTraining, type Repertoire } from '../lib/repertoire';
+import { describePlan, NEW_MISTAKE_CHOICES, NEW_MOVE_CHOICES, repTraining, todayPlan, trainPrefs, useTodayPlan, type TodayPart, type TodayPlan, type TrainPrefs } from '../lib/today';
 import { Icon } from './Icon';
 import { LineReviewSession } from './LineReview';
 import { DeckTabs, MistakeSession } from './MistakesTrain';
@@ -17,19 +18,50 @@ export function useTrainPrefs(): [TrainPrefs, (patch: Partial<TrainPrefs>) => vo
   return [prefs, set];
 }
 
-/** How many new moves (and mistake cards) a session adds, and whole lines or single cards. */
-export function SessionSettings({ mistakes = true }: { mistakes?: boolean }) {
-  const [prefs, setPrefs] = useTrainPrefs();
+/** One repertoire's session settings: how many new moves a session adds, and whole lines or single cards. Kept with the
+ *  repertoire, so each has its own, the same on all your devices. */
+export function RepSessionSettings({ rep, compact = false }: { rep: Repertoire; compact?: boolean }) {
+  const [prefs] = useTrainPrefs();
+  const own = repTraining(rep, prefs);
+  const set = (patch: { newMoves?: number; wholeLines?: boolean }) =>
+    useApp.getState().updateRep(rep.id, (r) => setTraining(r, patch), 'session settings', { undoable: false });
   return (
-    <div className="stack" style={{ gap: 8 }}>
+    <div className={compact ? 'row wrap' : 'stack'} style={{ gap: compact ? 10 : 8 }}>
       <div className="row wrap">
         <span className="muted small">New moves per session</span>
         {NEW_MOVE_CHOICES.map((n) => (
-          <span key={n} className={`chip ${prefs.newMoves === n ? 'on' : ''}`} onClick={() => setPrefs({ newMoves: n })} title={n === 0 ? 'Only reviews: no new moves' : undefined}>
+          <span key={n} className={`chip ${own.newMoves === n ? 'on' : ''}`} onClick={() => set({ newMoves: n })} title={n === 0 ? 'Only reviews: no new moves' : undefined}>
             {n}
           </span>
         ))}
       </div>
+      <label className="row small" style={{ gap: 6, cursor: 'pointer', alignItems: 'flex-start' }}>
+        <input type="checkbox" checked={own.wholeLines} onChange={(e) => set({ wholeLines: e.target.checked })} style={{ marginTop: 2 }} />
+        <span>
+          <b>Play whole lines</b>
+          {!compact && <span className="muted"> — you play all your moves of each line, for the reflex; a move that is not due only counts when you get it wrong.</span>}
+        </span>
+      </label>
+    </div>
+  );
+}
+
+/** Today's settings: your mistake cards, and each repertoire's own settings in one place. */
+function TodaySettings({ reps, mistakes }: { reps: Repertoire[]; mistakes: boolean }) {
+  const [prefs, setPrefs] = useTrainPrefs();
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      {reps.map((r) => (
+        <div key={r.id} className="stack" style={{ gap: 4 }}>
+          <div className="small">
+            <b>
+              {r.side === 'white' ? '♔' : '♚'} {r.name}
+            </b>
+            <span className="faint"> · {r.trainDepth ? `up to move ${r.trainDepth}` : 'all moves'} (on its own tab)</span>
+          </div>
+          <RepSessionSettings rep={r} compact />
+        </div>
+      ))}
       {mistakes && (
         <div className="row wrap">
           <span className="muted small">New mistake cards per session</span>
@@ -40,14 +72,7 @@ export function SessionSettings({ mistakes = true }: { mistakes?: boolean }) {
           ))}
         </div>
       )}
-      <label className="row small" style={{ gap: 6, cursor: 'pointer', alignItems: 'flex-start' }}>
-        <input type="checkbox" checked={prefs.wholeLines} onChange={(e) => setPrefs({ wholeLines: e.target.checked })} style={{ marginTop: 2 }} />
-        <span>
-          <b>Play whole lines</b>
-          <span className="muted"> — you play all your moves of each line, for the reflex; a move that is not due only counts when you get it wrong.</span>
-        </span>
-      </label>
-      <div className="small faint">The same on all your devices.</div>
+      <div className="small faint">Each repertoire keeps its own settings, the same on all your devices.</div>
     </div>
   );
 }
@@ -140,7 +165,7 @@ export function TodayTrain() {
             Paused, so left out: {paused.map((r) => r.name).join(', ')}.
           </div>
         )}
-        {settings && <SessionSettings mistakes={prefs.withMistakes} />}
+        {settings && <TodaySettings reps={reps.filter((r) => !r.paused)} mistakes={myCards && prefs.withMistakes} />}
       </div>
       <details className="card card-pad help">
         <summary>
@@ -173,8 +198,8 @@ function TodaySession({ plan, onExit }: { plan: TodayPlan; onExit: () => void })
   const reps = useApp((s) => s.data.repertoires);
   const activeRepId = useApp((s) => s.data.activeRepId);
   const profile = useApp(activeProfile);
-  // Whole lines or single cards, as chosen when the session started.
-  const [wholeLines] = useState(() => trainPrefs(profile).wholeLines);
+  // Whole lines or single cards per repertoire, as chosen when the session started.
+  const [wholeLines] = useState(() => new Map(reps.map((r) => [r.id, repTraining(r, trainPrefs(profile)).wholeLines])));
   const [index, setIndex] = useState(0);
   const [score, setScore] = useState<SessionScore>({ good: 0, bad: 0 });
   const part = plan.parts[index];
@@ -210,7 +235,7 @@ function TodaySession({ plan, onExit }: { plan: TodayPlan; onExit: () => void })
   );
   let body: React.ReactNode;
   if (part.kind === 'mistakes') body = <MistakeSession key={index} initial={part.cards} onExit={onExit} onDone={next} />;
-  else if (wholeLines) body = <LineReviewSession key={index} rep={rep!} items={part.items} start={[]} onExit={onExit} onDone={next} />;
+  else if (wholeLines.get(rep!.id)) body = <LineReviewSession key={index} rep={rep!} items={part.items} start={[]} onExit={onExit} onDone={next} />;
   else
     body = (
       <ReviewSession
@@ -241,7 +266,11 @@ function TodayDone({ score, onBack }: { score: SessionScore; onBack: () => void 
     };
   }, []);
   const reps = orderedReps(data, data.activeProfileId);
-  const left = todayPlan(reps, (data.mistakes ?? []).filter((m) => m.profileId === data.activeProfileId), { ...trainPrefs(profile), newMoves: 0, newMistakes: 0 });
+  const left = todayPlan(
+    reps.map((r) => ({ ...r, newMoves: 0 })),
+    (data.mistakes ?? []).filter((m) => m.profileId === data.activeProfileId),
+    { ...trainPrefs(profile), newMoves: 0, newMistakes: 0 },
+  );
   const fresh = reps.filter((r) => !r.paused).reduce((a, r) => a + counts(r).fresh, 0);
   return (
     <div style={{ maxWidth: 560, margin: '40px auto' }} className="card card-pad stack">

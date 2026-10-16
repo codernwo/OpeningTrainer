@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { formatLine, lichessAnalysisUrl, lineFromSans, moveFromBoard, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
+import { formatLine, lichessAnalysisUrl, moveFromBoard, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
 import {
   edgeId,
   findPath,
   inTrainDepth,
-  isMine,
   maxMyMoveNumber,
-  moveNumberAt,
   movesAt,
   myEdgesInOrder,
   reachable,
@@ -18,9 +16,7 @@ import {
   type Repertoire,
 } from '../lib/repertoire';
 import { buildQueue, counts, formatInterval, gradeCard, isLeech, Rating, resetCards, State, type TrainItem } from '../lib/srs';
-import { activeProfile, activeRep, useApp } from '../lib/store';
-import { gamesOf, useGames } from '../lib/gamesStore';
-import { pickReply, replyCounts, type ReplySource } from '../lib/practiceReply';
+import { activeRep, useApp } from '../lib/store';
 import { saveNow, type SaveResult } from '../lib/sync';
 import { playMoveSound } from '../lib/sound';
 import { useKey, useScrollToTop } from '../lib/hooks';
@@ -34,7 +30,9 @@ import { OpeningLabel } from './OpeningLabel';
 import { DeckTabs, MistakesTrain } from './MistakesTrain';
 import { SavedNote, saveMessage } from './SaveIndicator';
 import { Menu } from './Menu';
-import { SessionSettings, TodayTrain, useTrainPrefs } from './TodayTrain';
+import { repTraining } from '../lib/today';
+import { RepSessionSettings, TodayTrain, useTrainPrefs } from './TodayTrain';
+import { PracticeSession } from './PracticeLines';
 
 type Mode = 'review' | 'lines' | 'line-review';
 
@@ -51,10 +49,9 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
   const scope = useApp((s) => s.trainScope);
   const trainFrom = useApp((s) => s.trainFrom);
   const [mode, setMode] = useState<Mode | null>(null);
-  // New moves per session and whole lines: the player's choices, synced (shared with today's session).
+  // New moves per session and whole lines: this repertoire's own settings, synced (also used by today's session).
   const [prefs] = useTrainPrefs();
-  const newLimit = prefs.newMoves;
-  const wholeLines = prefs.wholeLines;
+  const { newMoves: newLimit, wholeLines } = repTraining(rep, prefs);
   // Freeze the queue when a session starts so grading doesn't reshuffle it.
   const [queue, setQueue] = useState<QItem[]>([]);
 
@@ -84,7 +81,7 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
   if (lost) return null;
   if (mode === 'review') return <ReviewSession rep={rep} initial={queue} onExit={() => setMode(null)} />;
   if (mode === 'line-review') return <LineReviewSession rep={rep} items={queue} start={scopePath ?? []} onExit={() => setMode(null)} />;
-  if (mode === 'lines') return <LinesSession rep={rep} start={scopePath ?? []} depth={rep.trainDepth} onExit={() => setMode(null)} />;
+  if (mode === 'lines') return <PracticeSession rep={rep} start={scopePath ?? []} onExit={() => setMode(null)} />;
 
   const now = Date.now();
   const c = { due: 0, fresh: 0, learned: 0 };
@@ -151,7 +148,7 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
         {rep.paused && (
           <div className="notice row wrap" style={{ gap: 8 }}>
             <span style={{ flex: 1, minWidth: 200 }}>
-              <b>Training paused.</b> This repertoire asks for no reviews and does not count as due. Practice lines still work.
+              <b>Training paused.</b> This repertoire asks for no reviews and does not count as due. Practicing all lines still works.
             </span>
             <button className="btn sm primary" onClick={togglePause}>
               <Icon name="train" size={14} /> Resume
@@ -188,15 +185,25 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
             {newLimit === 0 && !c.due && c.fresh > 0 && (
               <div className="help">Nothing to review right now. Choose a number of new moves in the settings below to learn some.</div>
             )}
-            <div className="row wrap">
-              <button className="btn primary" disabled={rep.paused || !startCount} onClick={startReview}>
-                <Icon name="train" size={16} /> Start review ({startCount})
-              </button>
-              <button className="btn" onClick={() => setMode('lines')}>
-                <Icon name="tree" size={16} /> Practice lines{scope ? ' from here' : ''}
-              </button>
-            </div>
           </>
+        )}
+        {allBranchEdges.length > 0 && (
+          <div className="train-choices">
+            <div className="stack" style={{ gap: 4 }}>
+              <button className="btn primary" disabled={rep.paused || !startCount} onClick={startReview}>
+                <Icon name="train" size={16} /> Train ({startCount})
+              </button>
+              <span className="small muted">Reviews and new moves: what you learn becomes cards that come back on schedule.</span>
+            </div>
+            <div className="stack" style={{ gap: 4 }}>
+              <button className="btn" onClick={() => setMode('lines')}>
+                <Icon name="tree" size={16} /> Practice all lines{scope ? ' from here' : ''}
+              </button>
+              <span className="small muted">
+                Every line to its end{depth ? ', past move ' + depth : ''}, the most played first. To explore and rehearse: no cards, no schedule.
+              </span>
+            </div>
+          </div>
         )}
         {allBranchEdges.length > 0 && (
           <details className="advanced">
@@ -205,7 +212,7 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
             </summary>
             <div className="stack" style={{ gap: 12, marginTop: 10 }}>
               {maxMove > 1 && <DepthSetting depth={depth} maxMove={maxMove} total={total} deeper={deeper} onChange={setDepth} />}
-              <SessionSettings mistakes={false} />
+              <RepSessionSettings rep={rep} />
             </div>
           </details>
         )}
@@ -263,13 +270,15 @@ function RepertoireTrain({ rep }: { rep: Repertoire }) {
           </div>
           <div>
             New moves are shown first (green arrow) and quizzed again later in the same session. Each card asks for its own
-            move: where you have two prepared, the other one does not pass it. <b>Practice lines</b> plays lines all the way
-            through, with the replies as often as people play them, and does not affect the schedule. Use <b>Train from here</b>{' '}
-            in the tree or on the build board to focus on one branch.
+            move: where you have two prepared, the other one does not pass it. <b>Practice all lines</b> goes through every
+            line to its end, also past the depth you train up to, the lines you meet most first (the line thickness in the
+            Tree), and leaves your cards alone: for exploring a branch or rehearsing it without new cards. Use{' '}
+            <b>Train from here</b> in the tree or on the build board to focus on one branch, for either.
           </div>
           <div>
-            <b>Train up to move</b> (in the settings, per repertoire) learns a wide repertoire breadth-first: first the opening
-            moves of every line, later deeper. Moves beyond it are left out of every kind of training; the ones you had learned
+            The settings (how many new moves a session adds, whole lines or single cards, and how deep) belong to each
+            repertoire and are the same on all your devices; Today uses each repertoire's own. <b>Train up to move</b> learns a wide repertoire breadth-first: first the opening
+            moves of every line, later deeper. Moves beyond it are left out of training (not of practice); the ones you had learned
             keep their schedule and come back when you go deeper.
           </div>
           <div>
@@ -852,178 +861,6 @@ export function AuthorText({ words }: { words: (Words | undefined)[] }) {
           <b className="muted">{w.label}</b> {w.text}
         </div>
       ))}
-    </div>
-  );
-}
-
-/** Ungraded practice: plays prepared opponent moves, as often as people play them; you answer with your repertoire
- *  until the line ends. */
-function LinesSession({ rep, start, depth, onExit }: { rep: Repertoire; start: PathStep[]; depth?: number; onExit: () => void }) {
-  useScrollToTop();
-  const profile = useApp(activeProfile);
-  const gamesData = useGames((s) => s.data);
-  // Counted once per session: what your opponents played against this colour in your games.
-  const own = useMemo(() => replyCounts(gamesOf(gamesData, rep.profileId), rep.side), []); // eslint-disable-line react-hooks/exhaustive-deps
-  const [source, setSource] = useState<ReplySource | null>(null);
-  // The comment on the move you just played, in view until your next move.
-  const [said, setSaid] = useState<Words | null>(null);
-  const startKey = start.at(-1)?.to ?? ROOT;
-  const startArrow = start.length ? uciToArrow(start[start.length - 1].uci) : null;
-  const [pos, setPos] = useState(startKey);
-  // What the board shows; differs from `pos` briefly while a wrong move is displayed.
-  const [shown, setShown] = useState(startKey);
-  const [line, setLine] = useState<string[]>(start.map((s) => s.san));
-  const [lastMove, setLastMove] = useState<[string, string] | null>(startArrow);
-  const [shapes, setShapes] = useState<Shape[]>([]);
-  const [message, setMessage] = useState<React.ReactNode>(null);
-  const [stats, setStats] = useState({ lines: 0, good: 0, bad: 0 });
-  const [flash, triggerFlash] = useFlash();
-  const [waiting, setWaiting] = useState(false);
-  const [round, setRound] = useState(0);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const later = (fn: () => void, ms: number) => timers.current.push(setTimeout(fn, ms));
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
-
-  const go = (key: string, uci: string | null) => {
-    setPos(key);
-    setShown(key);
-    setLastMove(uci ? uciToArrow(uci) : null);
-  };
-
-  const restart = () => {
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-    go(startKey, start.length ? start[start.length - 1].uci : null);
-    setLine(start.map((s) => s.san));
-    setShapes([]);
-    setMessage(null);
-    setSaid(null);
-    setWaiting(false);
-    setRound((r) => r + 1);
-  };
-
-  // Opponent's turn: pick one of the prepared replies at random.
-  useEffect(() => {
-    // With a training depth, a line ends after your last move within it (the ply of your next move would be too deep).
-    const nextMine = isMine(rep, pos) ? line.length : line.length + 1;
-    const tooDeep = !!depth && moveNumberAt(nextMine) > depth;
-    const moves = tooDeep ? [] : movesAt(rep, pos);
-    if (tooDeep && line.length <= start.length) {
-      setMessage(<>This branch starts after move {depth}, how deep you train this repertoire.</>);
-      return;
-    }
-    if (!moves.length) {
-      if (line.length > start.length) {
-        setMessage(tooDeep ? <>Up to move {depth} ✓</> : <>End of the line ✓</>);
-        setStats((s) => ({ ...s, lines: s.lines + 1 }));
-        later(restart, 1200);
-      }
-      return;
-    }
-    if (isMine(rep, pos)) return;
-    setWaiting(true);
-    let alive = true;
-    const at = pos;
-    const shown = Date.now();
-    pickReply(moves, at, { ratings: profile?.ratings ?? [], speeds: profile?.speeds ?? [], own }).then(({ move: m, source }) => {
-      if (!alive) return;
-      if (moves.length > 1) setSource(source);
-      // At least half a second of "thinking", as before.
-      later(() => {
-        go(m.to, m.uci);
-        playMoveSound(m);
-        setLine((l) => [...l, m.san]);
-        setWaiting(false);
-      }, Math.max(0, 500 - (Date.now() - shown)));
-    });
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pos, round]);
-
-  const onMove = (orig: string, dest: string) => {
-    const m = moveFromBoard(pos, orig, dest);
-    if (!m) return;
-    const expected = movesAt(rep, pos);
-    playMoveSound(m);
-    if (expected.some((x) => x.uci === m.uci)) {
-      triggerFlash('flash-good');
-      setShapes([]);
-      setMessage(null);
-      const text = expected.find((x) => x.uci === m.uci)?.comment?.trim();
-      setSaid(text ? { label: `${moveNo(line.length)}${m.san}`, text } : null);
-      setStats((s) => ({ ...s, good: s.good + 1 }));
-      go(m.to, m.uci);
-      setLine((l) => [...l, m.san]);
-    } else {
-      triggerFlash('flash-bad');
-      setSaid(null);
-      setStats((s) => ({ ...s, bad: s.bad + 1 }));
-      setShown(m.to);
-      setWaiting(true);
-      setMessage(
-        <>
-          Your repertoire plays <b>{expected.map((x) => x.san).join(' or ')}</b> here.
-        </>,
-      );
-      later(() => {
-        setShown(pos);
-        setWaiting(false);
-        setShapes(expected.map((x) => moveArrow(x.uci, rep.side)));
-      }, 650);
-    }
-  };
-
-  return (
-    <div className="train">
-      <div className="board-area">
-        <Board
-          className={flash}
-          position={shown}
-          orientation={rep.side}
-          movable={!waiting && isMine(rep, pos) && movesAt(rep, pos).length ? rep.side : null}
-          lastMove={lastMove}
-          shapes={shapes}
-          onMove={onMove}
-        />
-      </div>
-      <div className="stack train-panel">
-        <div className="card card-pad stack">
-          <div className="row">
-            <h2>Practice lines</h2>
-            <span className="spacer" />
-            <span className="badge">{stats.lines} lines</span>
-            <span className="badge mine">{stats.good} right</span>
-            <span className="badge gap">{stats.bad} wrong</span>
-          </div>
-          <div className="small muted train-context">{tailOf(line) || 'Starting position'}</div>
-          <OpeningLabel keys={(lineFromSans(line) ?? []).map((m) => m.to)} reserve />
-          <div className="feedback info">{message ?? (isMine(rep, pos) ? (movesAt(rep, pos).length ? 'Your move.' : 'Nothing prepared here.') : 'Opponent is thinking…')}</div>
-          {source && (
-            <div className="small faint">
-              The opponent picks from your prepared replies{' '}
-              {source === 'database'
-                ? 'as often as they are played on Lichess (your rating groups and speeds)'
-                : source === 'games'
-                  ? 'as often as your opponents played them in your games'
-                  : 'at random (no Lichess connection and none of your games here)'}
-              .
-            </div>
-          )}
-          <div className="row">
-            <button className="btn" onClick={restart}>
-              New line
-            </button>
-            <span className="spacer" />
-            <button className="btn ghost" onClick={onExit}>
-              Stop
-            </button>
-          </div>
-          <PositionLinks line={lineFromSans(line) ?? []} positionKey={pos} orientation={rep.side} />
-          {said && <AuthorText words={[said]} />}
-        </div>
-      </div>
     </div>
   );
 }

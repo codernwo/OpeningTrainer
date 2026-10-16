@@ -60,6 +60,10 @@ export interface Repertoire {
   trainDepth?: number;
   /** Training paused: no reviews, not counted as due, until resumed. The cards keep their schedule. */
   paused?: boolean;
+  /** New moves per session for this repertoire. Absent: what the player had chosen for all repertoires (older data). */
+  newMoves?: number;
+  /** Review this repertoire in whole lines instead of single cards. Absent: the player's older choice. */
+  wholeLines?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -149,8 +153,15 @@ export function onlyCardsChanged(a: Repertoire, b: Repertoire): boolean {
     a.profileId === b.profileId &&
     !!a.study === !!b.study &&
     a.trainDepth === b.trainDepth &&
-    !!a.paused === !!b.paused
+    !!a.paused === !!b.paused &&
+    a.newMoves === b.newMoves &&
+    a.wholeLines === b.wholeLines
   );
+}
+
+/** This repertoire's own session settings (new moves per session, whole lines). */
+export function setTraining(rep: Repertoire, patch: { newMoves?: number; wholeLines?: boolean }): Repertoire {
+  return { ...rep, ...patch, updatedAt: Date.now() };
 }
 
 export function setPaused(rep: Repertoire, paused: boolean): Repertoire {

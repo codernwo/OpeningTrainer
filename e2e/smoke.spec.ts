@@ -22,6 +22,29 @@ test('a repertoire from a PGN: overview, build and tree', async ({ page }) => {
   await expect(page.locator('cg-board')).toBeVisible();
 });
 
+test('practice all lines: every line to its end, without cards', async ({ page }) => {
+  await start(page, { name: 'Open games', pgn: REP });
+  await go(page, 'Train');
+  await page.locator('main button', { hasText: 'Open games' }).first().click();
+  await page.getByRole('button', { name: /Practice all lines/ }).click();
+  const feedback = page.locator('.feedback');
+  const yourMove = () => expect(feedback).toHaveText('Your move.');
+  for (const [i, mine] of [
+    [1, ['e2', 'e4', 'g1', 'f3']],
+    [2, ['e2', 'e4', 'f1', 'c4']],
+  ] as const) {
+    await expect(page.locator('.train-panel')).toContainText(`Line ${i} of 2`);
+    await yourMove();
+    await move(page, mine[0], mine[1]);
+    await yourMove();
+    await move(page, mine[2], mine[3]);
+  }
+  await expect(page.getByText('All 2 lines played')).toBeVisible();
+  await page.getByRole('button', { name: 'Back' }).click();
+  // The cards are untouched: still three new moves.
+  await expect(page.locator('.stat', { hasText: 'new' }).locator('b')).toHaveText('3');
+});
+
 test("train: today's session learns the new moves, then recalls them", async ({ page }) => {
   await start(page, { name: 'Open games', pgn: REP });
   await go(page, 'Overview');

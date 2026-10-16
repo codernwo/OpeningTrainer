@@ -54,16 +54,22 @@ describe("today's plan", () => {
     expect(describePlan(plan)).toBe('3 reviews · 2 mistake cards · 2 new moves');
   });
 
-  it('leaves paused repertoires out, and shares the new moves over the repertoires in order', () => {
+  it('leaves paused repertoires out, and takes new moves from each repertoire up to its own number', () => {
     const white2 = rep('White 2', 'white', ['d4', 'd5', 'c4']);
     const plan = todayPlan([setPaused(white, true), black, white2], [], { ...prefs, newMoves: 4 }, later);
     expect(plan.due).toBe(0);
     const news = plan.parts.filter((p) => p.kind === 'new');
     expect(news.map((p) => (p.kind === 'new' ? [p.repId, p.items.length] : null))).toEqual([
       [black.id, 3],
-      [white2.id, 1],
+      [white2.id, 2],
     ]);
-    expect(plan.total).toBe(4);
+    expect(plan.total).toBe(5);
+  });
+
+  it("uses a repertoire's own number of new moves over the player's older one", () => {
+    const white2 = rep('White 2', 'white', ['d4', 'd5', 'c4']);
+    const plan = todayPlan([{ ...black, newMoves: 1 }, { ...white2, newMoves: 0 }], [], { ...prefs, newMoves: 10 }, later);
+    expect(plan.parts.map((p) => (p.kind === 'new' ? [p.repId, p.items.length] : p.kind))).toEqual([[black.id, 1]]);
   });
 
   it('leaves the mistake cards out when you choose so', () => {

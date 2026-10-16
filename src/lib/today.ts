@@ -1,7 +1,7 @@
 // Today's training: one session for all your repertoires and your mistake cards, and one number for it — the same on
 // the Overview, on the Train tab and in the session. In this order: the reviews due in every repertoire you train (not
 // paused; each in tree order, so consecutive cards share their context), then your mistake cards (due ones first, then
-// new ones up to your limit), then new moves up to your limit, repertoire by repertoire in your Overview order.
+// new ones up to your limit), then new moves, each repertoire up to its own number, in your Overview order.
 import { useMemo } from 'react';
 import { mistakeQueue, type MistakeCard } from './mistakes';
 import type { Repertoire } from './repertoire';
@@ -10,14 +10,19 @@ import { activeProfile, orderedReps, useApp, type Profile } from './store';
 
 /** How a player trains, synced with their other devices. */
 export interface TrainPrefs {
-  /** New moves per session (all repertoires together). */
+  /** New moves per session: from older data, now the starting point of each repertoire's own number. */
   newMoves: number;
   /** New mistake cards per session. */
   newMistakes: number;
   /** Your mistake cards are part of today's session (off: only your repertoires). */
   withMistakes: boolean;
-  /** Review in whole lines instead of single cards. */
+  /** Review in whole lines instead of single cards: from older data, now each repertoire's starting point. */
   wholeLines: boolean;
+}
+
+/** A repertoire's own session settings; one that never chose takes what the player had chosen for all of them. */
+export function repTraining(rep: Pick<Repertoire, 'newMoves' | 'wholeLines'>, prefs: TrainPrefs): { newMoves: number; wholeLines: boolean } {
+  return { newMoves: rep.newMoves ?? prefs.newMoves, wholeLines: rep.wholeLines ?? prefs.wholeLines };
 }
 
 export const NEW_MOVE_CHOICES = [0, 5, 10, 20, 50];
@@ -72,14 +77,13 @@ export function todayPlan(reps: readonly Repertoire[], mistakes: readonly Mistak
   }
   const cards = prefs.withMistakes ? mistakeQueue([...mistakes], prefs.newMistakes, now) : [];
   if (cards.length) parts.push({ kind: 'mistakes', cards, due: cards.filter((c) => c.card.state !== State.New).length });
-  let left = prefs.newMoves;
   let fresh = 0;
   for (const rep of training) {
-    if (left <= 0) break;
-    const items = buildQueue(rep, { newLimit: left, now }).filter((i) => i.isNew);
+    const limit = repTraining(rep, prefs).newMoves;
+    if (limit <= 0) continue;
+    const items = buildQueue(rep, { newLimit: limit, now }).filter((i) => i.isNew);
     if (items.length) {
       parts.push({ kind: 'new', repId: rep.id, items });
-      left -= items.length;
       fresh += items.length;
     }
   }
