@@ -41,6 +41,9 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
   const [theirs, setTheirs] = useState<Words[]>([]);
   const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState({ lines: 0, good: 0, bad: 0 });
+  // A line with a mistake comes again until you play it through without one (or go on with Next line).
+  const [missed, setMissed] = useState(false);
+  const [attempt, setAttempt] = useState(1);
   const [flash, triggerFlash] = useFlash();
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const later = (fn: () => void, ms: number) => timers.current.push(setTimeout(fn, ms));
@@ -85,6 +88,8 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
 
   const goTo = (i: number) => {
     clearTimers();
+    setAttempt((a) => (i === index ? a + 1 : 1));
+    setMissed(false);
     setIndex(i);
     setK(0);
     setShown(startKey);
@@ -94,13 +99,18 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
     setBusy(false);
   };
 
-  // The opponent plays the line's move; at the end of a line, on to the next one.
+  // The opponent plays the line's move; at the end of a line, on to the next one — or the same one again after a mistake.
   useEffect(() => {
     if (!line) return;
     if (k === steps.length) {
+      setBusy(true);
+      if (missed) {
+        setMessage(<>End of the line — once more, without a mistake.</>);
+        later(() => goTo(index), 1600);
+        return;
+      }
       setMessage(line.via !== undefined ? <>End of the line ✓ (it transposed after {moveNo(start.length + line.via)}{steps[line.via].san})</> : <>End of the line ✓</>);
       setStats((s) => ({ ...s, lines: s.lines + 1 }));
-      setBusy(true);
       later(() => goTo(index + 1), 1400);
       return;
     }
@@ -140,6 +150,7 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
     if (!other) {
       triggerFlash('flash-bad');
       setStats((s) => ({ ...s, bad: s.bad + 1 }));
+      setMissed(true);
     }
     setShown(m.to);
     setBusy(true);
@@ -178,6 +189,9 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
   );
 
   const unknown = useMemo(() => !!lines?.some((l) => !l.known), [lines]);
+  // The same array while nothing changes: a new one would set the board up again and drop a piece you had picked up.
+  const lastUci = k ? steps[k - 1]?.uci : start.at(-1)?.uci;
+  const lastMove = useMemo(() => (shown === pos && lastUci ? uciToArrow(lastUci) : null), [shown === pos, lastUci]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (lines && index >= lines.length) {
     return (
@@ -209,7 +223,6 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
   }
 
   const sans = [...startSans, ...played.map((s) => s.san)];
-  const lastUci = k ? steps[k - 1].uci : start.at(-1)?.uci;
   return (
     <div className="train">
       <div className="board-area">
@@ -218,7 +231,7 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
           position={shown}
           orientation={rep.side}
           movable={line && !busy && next && isMine(rep, pos) ? rep.side : null}
-          lastMove={shown === pos && lastUci ? uciToArrow(lastUci) : null}
+          lastMove={lastMove}
           shapes={shapes}
           onMove={onMove}
         />
@@ -230,6 +243,7 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
             {lines ? (
               <>
                 Line {index + 1} of {lines.length}
+                {attempt > 1 && <> · try {attempt}</>}
                 {line?.known && <> · about {pct(line.reach)} of your games{start.length ? ' from here' : ''}</>}
               </>
             ) : (
@@ -257,8 +271,8 @@ export function PracticeSession({ rep, start, onExit }: { rep: Repertoire; start
           <PositionLinks line={lineFromSans(sans) ?? []} positionKey={pos} orientation={rep.side} />
           <AuthorText words={[...mine, ...theirs]} />
           <div className="small faint">
-            Every line to its end, the ones you meet most first{rep.trainDepth ? `, also past move ${rep.trainDepth}` : ''}. Practice leaves your
-            training schedule alone.
+            Every line to its end{rep.trainDepth ? `, also past move ${rep.trainDepth}` : ''}, the ones you meet most first. A line with a
+            mistake comes again until you play it without one (or press Next line). Practice leaves your training schedule alone.
             {unknown && ' Where nothing is known about a position, its replies count as equally often.'}
           </div>
         </div>

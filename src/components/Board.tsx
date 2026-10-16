@@ -150,7 +150,9 @@ export function Board({ position, orientation, movable, lastMove, shapes, drawn,
         dests: canMove ? (dests(position) as Map<Key, Key[]>) : new Map(),
       },
     });
-  }, [position, orientation, movable, lastMove]);
+    // By value: a new array with the same squares must not set the board up again (it would drop a picked-up piece).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [position, orientation, movable, lastMove?.join()]);
 
   useEffect(() => {
     api.current?.setAutoShapes(shapes ?? []);

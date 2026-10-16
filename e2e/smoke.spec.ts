@@ -28,19 +28,34 @@ test('practice all lines: every line to its end, without cards', async ({ page }
   await page.locator('main button', { hasText: 'Open games' }).first().click();
   await page.getByRole('button', { name: /Practice all lines/ }).click();
   const feedback = page.locator('.feedback');
-  const yourMove = () => expect(feedback).toHaveText('Your move.');
-  for (const [i, mine] of [
-    [1, ['e2', 'e4', 'g1', 'f3']],
-    [2, ['e2', 'e4', 'f1', 'c4']],
+  const line = page.locator('.train-context');
+  // Plays one of your moves once it is your turn, and waits until it is on the board.
+  const play = async (from: string, to: string, san: string, before: string) => {
+    await expect(line).toHaveText(before);
+    await expect(feedback).toHaveText('Your move.');
+    await move(page, from, to);
+    await expect(line).toContainText(san);
+  };
+  for (const [i, last] of [
+    [1, ['g1', 'f3', 'Nf3']],
+    [2, ['f1', 'c4', 'Bc4']],
   ] as const) {
     await expect(page.locator('.train-panel')).toContainText(`Line ${i} of 2`);
-    await yourMove();
-    await move(page, mine[0], mine[1]);
-    await yourMove();
-    await move(page, mine[2], mine[3]);
+    await play('e2', 'e4', 'e4', 'Starting position');
+    await play(last[0], last[1], last[2], '1. e4 e5');
   }
   await expect(page.getByText('All 2 lines played')).toBeVisible();
-  await page.getByRole('button', { name: 'Back' }).click();
+  // A mistake brings the line back until it is played without one.
+  await page.getByRole('button', { name: 'Again' }).click();
+  await expect(feedback).toHaveText('Your move.');
+  await move(page, 'd2', 'd4');
+  await expect(feedback).toContainText('Your repertoire plays e4');
+  await page.waitForTimeout(900); // the wrong move is taken back
+  await move(page, 'e2', 'e4');
+  await expect(line).toContainText('e4');
+  await play('g1', 'f3', 'Nf3', '1. e4 e5');
+  await expect(page.locator('.train-panel')).toContainText('Line 1 of 2 · try 2');
+  await page.getByRole('button', { name: 'Stop' }).click();
   // The cards are untouched: still three new moves.
   await expect(page.locator('.stat', { hasText: 'new' }).locator('b')).toHaveText('3');
 });
