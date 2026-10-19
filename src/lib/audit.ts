@@ -3,7 +3,7 @@
 import { keyToFen, playSan, turnOfKey, type Side } from './chess';
 import { evaluate, scoreCp, type Evaluation } from './evaluate';
 import { AuthRequiredError, explorerCacheKey, fetchExplorer, peekCache, totalGames, warmCache, type ExplorerResult } from './lichess';
-import { buildTree, edgeId, isMine, movesAt, ROOT, type EngineFlag, type Repertoire, type TreeNode } from './repertoire';
+import { buildTree, deletionImpact, edgeId, isMine, movesAt, ROOT, type EngineFlag, type Repertoire, type TreeNode } from './repertoire';
 
 export interface LineRef {
   /** Position the finding is about. */
@@ -30,9 +30,25 @@ export interface LineEnd extends LineRef {
   routes: number;
 }
 
+/** A branch of your repertoire you meet in fewer of your games than the threshold: a candidate to trim. `key` is the
+ *  position after the opponent's rare reply, `line` the moves to it (ending with that reply). */
+export interface RareBranch extends LineRef {
+  /** Where the reply is played, and the reply itself. */
+  from: string;
+  uci: string;
+  san: string;
+  /** Estimated share of all your games that reach it, over every move order (0: not in the database's list). */
+  reach: number;
+  routes: number;
+  /** Half-moves that go with it if it is deleted (lines that stay reachable another way are kept). */
+  plies: number;
+}
+
 export interface GapReport {
   gaps: Gap[];
   lineEnds: LineEnd[];
+  /** Prepared branches rarer than the threshold (absent in older results). */
+  rare?: RareBranch[];
   /** Share of games that stays inside prepared territory (until your lines end). */
   coverage: number;
   positions: number;
@@ -97,30 +113,40 @@ export async function findGaps(
   };
 
   // Positions waiting per half-move: reach summed over the routes that arrive there, and the line of the likeliest one.
-  type Entry = { reach: number; line: string[]; best: number; routes: number };
+  // `via`: the opponent's move that led there on that line.
+  type Via = { from: string; uci: string; san: string };
+  type Entry = { reach: number; line: string[]; best: number; routes: number; via?: Via };
   const levels = new Map<number, Map<string, Entry>>();
-  const arrive = (ply: number, key: string, reach: number, line: string[], routes = 1) => {
+  const arrive = (ply: number, key: string, reach: number, line: string[], routes = 1, via?: Via) => {
     let level = levels.get(ply);
     if (!level) levels.set(ply, (level = new Map()));
     const e = level.get(key);
-    if (!e) level.set(key, { reach, line, best: reach, routes });
+    if (!e) level.set(key, { reach, line, best: reach, routes, via });
     else {
       e.reach += reach;
       e.routes += routes;
-      if (reach > e.best) {
+      if (reach > e.best || (!e.via && via)) {
         e.best = reach;
         e.line = line;
+        e.via = via;
       }
     }
   };
+  const rare: RareBranch[] = [];
   arrive(0, ROOT, 1, []);
 
   for (let ply = 0; ply <= opts.maxPly && [...levels.keys()].some((p) => p >= ply); ply++) {
     const level = levels.get(ply);
     if (!level) continue;
     levels.delete(ply);
-    for (const [key, { reach, line, routes }] of [...level].sort((a, b) => b[1].reach - a[1].reach)) {
+    for (const [key, { reach, line, routes, via }] of [...level].sort((a, b) => b[1].reach - a[1].reach)) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      // The reverse of a gap: a reply you prepared that you meet too rarely (only the first one on a branch: the walk
+      // does not go on below it).
+      if (reach < opts.minReach && via && ply <= opts.maxPly) {
+        rare.push({ key, line, ...via, reach, routes, plies: deletionImpact(rep, via.from, via.uci).plies });
+        continue;
+      }
       if (ply >= opts.maxPly || reach < opts.minReach) continue;
       const prepared = movesAt(rep, key);
 
@@ -158,7 +184,7 @@ export async function findGaps(
       for (const em of stats.moves) {
         const share = totalGames(em) / total;
         const repMove = prepared.find((m) => m.san === em.san);
-        if (repMove) arrive(ply + 1, repMove.to, reach * share, [...line, repMove.san], routes);
+        if (repMove) arrive(ply + 1, repMove.to, reach * share, [...line, repMove.san], routes, { from: key, uci: repMove.uci, san: repMove.san });
         else {
           uncovered += reach * share;
           const id = `${key}|${em.san}`;
@@ -169,6 +195,9 @@ export async function findGaps(
           } else gaps.set(id, { key, line, san: em.san, share, reach: reach * share, best: reach, games: totalGames(em), routes });
         }
       }
+      // Replies you prepared that the database does not list here at all: rarer than anything it shows.
+      for (const m of prepared)
+        if (!stats.moves.some((em) => em.san === m.san)) arrive(ply + 1, m.to, 0, [...line, m.san], routes, { from: key, uci: m.uci, san: m.san });
     }
   }
 
@@ -177,6 +206,8 @@ export async function findGaps(
   const keep = (g: Gap) => g.reach >= opts.minReach || (opts.localShare !== undefined && g.share >= opts.localShare);
   report.gaps = [...gaps.values()].filter(keep).map(({ best: _b, ...g }) => g).sort((a, b) => b.reach - a.reach);
   report.lineEnds = [...ends.values()].map(({ best: _b, ...e }) => e).sort((a, b) => b.reach - a.reach);
+  // The biggest branches first: where trimming saves the most.
+  report.rare = rare.sort((a, b) => b.plies - a.plies || a.reach - b.reach);
   return report;
 }
 

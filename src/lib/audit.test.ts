@@ -62,4 +62,19 @@ describe('finding gaps', () => {
     const strict = await findGaps(rep, { ratings: [], speeds: [], minReach: 0.5, maxPly: 20, localShare: 0.05 }, () => {}, new AbortController().signal, explorer);
     expect(strict.gaps.map((g) => g.san).sort()).toEqual(['g6']);
   });
+
+  it('lists the prepared branches you meet too rarely, the biggest first: what to trim', async () => {
+    let r2 = rep;
+    r2 = addLine(r2, lineFromSans(['d4', 'Nf6', 'c4', 'a5', 'Nc3'])!); // a5: not in the database's list at all
+    const r = await findGaps(r2, { ratings: [], speeds: [], minReach: 0.45, maxPly: 20 }, () => {}, new AbortController().signal, explorer);
+    const rare = r.rare!.map((b) => [b.line.join(' '), +b.reach.toFixed(2), b.plies]);
+    expect(rare).toEqual([
+      // 1…e6 (40%): deleting it takes 1…e6 2.c4 Nf6 (the position after it stays, reached by 1…Nf6 2.c4 e6).
+      ['d4 e6', 0.4, 3],
+      ['d4 Nf6 c4 a5', 0, 2],
+      // 2…e6 after 1…Nf6 2.c4: 30% (the other way there stopped at 1…e6); its moves stay reachable via 1…e6.
+      ['d4 Nf6 c4 e6', 0.3, 1],
+    ]);
+    expect(r.rare![0]).toMatchObject({ san: 'e6', from: key(['d4']) });
+  });
 });

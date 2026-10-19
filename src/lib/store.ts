@@ -56,7 +56,7 @@ export interface AppData {
 
 export interface CheckTour {
   repId: string;
-  kind: 'gaps' | 'ends' | 'engine';
+  kind: 'gaps' | 'ends' | 'engine' | 'trim';
   /** The items' ids in the saved results, in order. */
   ids: string[];
   index: number;

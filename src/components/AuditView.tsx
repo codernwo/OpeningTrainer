@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { formatLine } from '../lib/chess';
 import { engineCheck, findGaps, LOCAL_GAP_SHARE, lossLabel } from '../lib/audit';
 import { engineChanged, gapFilters, gapsChanged, savedEngine, savedGaps } from '../lib/checkResults';
-import { StatusMark, tourItems, type TourItem } from './CheckTour';
+import { StatusMark, toggleKeep, tourItems, trimBranch, type TourItem } from './CheckTour';
+import { toMoves } from '../lib/repertoire';
+import { rareId } from '../lib/checkResults';
 import type { CheckTour } from '../lib/store';
 import { AuthRequiredError, getToken, startLogin } from '../lib/lichess';
 import { activeProfile, activeRep, useApp } from '../lib/store';
@@ -133,6 +135,7 @@ export function AuditView() {
     !!saved?.engine && (engOpts.threshold !== saved.engine.threshold || (saved.engine.depth !== undefined && engOpts.localDepth !== saved.engine.depth));
   const gapItems = tourItems(rep, saved, 'gaps').filter((it) => (it.reach ?? 1) >= shownMin || (localShown && (it.share ?? 0) >= LOCAL_GAP_SHARE));
   const endItems = tourItems(rep, saved, 'ends');
+  const trimItems = tourItems(rep, saved, 'trim');
   const engineItems = tourItems(rep, saved, 'engine');
   // A reply you added since the check moves its games inside your preparation (at least until that line ends).
   const coverage = gaps
@@ -319,6 +322,64 @@ export function AuditView() {
                 </div>
               </div>
             )}
+            <div className="section">
+              <div className="row wrap" style={{ marginBottom: 6 }}>
+                <h3>
+                  Rare lines to trim{gaps.rare ? ` (${trimItems.length}${doneCount(trimItems) ? ` · ${doneCount(trimItems)} done` : ''})` : ''}
+                </h3>
+              </div>
+              <div className="help" style={{ marginBottom: 6 }}>
+                The reverse of a gap: replies you prepared that you meet in fewer than {formatPct(saved?.gaps?.minReach ?? gapOpts.minReach)} of your
+                games, with everything after them — each costs training time. The biggest first. Click one to look at it on the
+                board and change it there; <b>Delete</b> takes the branch out (Undo is possible), <b>Keep</b> marks one that matters
+                however rare it is (a trap, a critical try, a line you love). Lines that stay reachable by another move order are
+                not deleted.
+              </div>
+              {!gaps.rare ? (
+                <div className="empty">This search is older than this list. Search again to see the rare lines.</div>
+              ) : trimItems.length === 0 ? (
+                <div className="empty">Nothing rarer than the threshold. Lean!</div>
+              ) : (
+                <div className="result-list">
+                  {visible(trimItems).map((it) => {
+                    const b = gaps.rare!.find((x) => rareId(x) === it.id)!;
+                    const moves = toMoves(b.plies);
+                    const gone = it.status.note === 'deleted';
+                    const kept = it.status.note === 'kept';
+                    return (
+                      <div
+                        key={it.id}
+                        className={`result-item ${it.status.state}`}
+                        onClick={() => !gone && open('trim', visible(trimItems).filter((x) => x.status.note !== 'deleted'), it)}
+                        title={gone ? 'Deleted' : 'Open this line on the board'}
+                      >
+                        <span className="badge num" title={b.reach ? `${formatPct(b.reach)} of your games` : 'Not among the replies the database lists here'}>
+                          {b.reach ? formatPct(b.reach) : '—'}
+                        </span>
+                        <LineWithLast line={b.line.slice(0, -1)} last={b.san} />
+                        <span className="faint small num">
+                          {moves} {moves === 1 ? 'move' : 'moves'}
+                          {b.routes > 1 ? ` · ${b.routes} move orders` : ''}
+                        </span>
+                        {!gone && (
+                          <span className="row" style={{ gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                            <button className="btn sm ghost" aria-pressed={kept} onClick={() => toggleKeep(rep, it.id)} title="Rare, but you want it">
+                              {kept ? 'Kept ✓' : 'Keep'}
+                            </button>
+                            {!kept && (
+                              <button className="btn sm ghost danger" onClick={() => trimBranch(rep, b)} title={`Delete ${b.san} and the moves after it`}>
+                                <Icon name="trash" size={14} /> Delete
+                              </button>
+                            )}
+                          </span>
+                        )}
+                        <StatusMark status={it.status} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             {gaps.errors.length > 0 && <div className="section notice error small">{gaps.errors.slice(0, 3).join(' · ')}</div>}
           </>
         )}

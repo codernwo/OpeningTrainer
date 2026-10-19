@@ -1,8 +1,8 @@
 // The last gap search and engine check of each repertoire, kept with the data (and synced) so you can work through
 // them one by one, on any device, and see what you have already dealt with and whether the repertoire changed since.
 import { createStore, del as idbDel, get as idbGet, keys as idbKeys } from 'idb-keyval';
-import type { EngineIssue, Gap, GapReport, LineEnd } from './audit';
-import { isMine, movesAt, type Repertoire } from './repertoire';
+import type { EngineIssue, Gap, GapReport, LineEnd, RareBranch } from './audit';
+import { deletionImpact, isMine, movesAt, type Repertoire } from './repertoire';
 
 export interface SavedGaps {
   report: GapReport;
@@ -26,10 +26,19 @@ export interface SavedEngine {
   reused?: number;
 }
 
+/** Rare branches you chose to keep (they matter, however rare): the ids of the replies, `from|uci`. */
+export interface KeptBranches {
+  ids: string[];
+  at: number;
+}
+
 export interface CheckResults {
   gaps?: SavedGaps;
   engine?: SavedEngine;
+  keep?: KeptBranches;
 }
+
+export const rareId = (b: Pick<RareBranch, 'from' | 'uci'>) => `${b.from}|${b.uci}`;
 
 // ---------------------------------------------------------------------------
 // Fingerprints
@@ -119,9 +128,10 @@ export function mergeChecks(
     const y = b[id] ?? {};
     const gaps = newest(x.gaps, y.gaps);
     const engine = newest(x.engine, y.engine);
-    if (a[id] && gaps === x.gaps && engine === x.engine) out[id] = a[id];
+    const keep = newest(x.keep, y.keep);
+    if (a[id] && gaps === x.gaps && engine === x.engine && keep === x.keep) out[id] = a[id];
     else {
-      out[id] = { ...(gaps ? { gaps } : {}), ...(engine ? { engine } : {}) };
+      out[id] = { ...(gaps ? { gaps } : {}), ...(engine ? { engine } : {}), ...(keep ? { keep } : {}) };
       same = false;
     }
   }
@@ -176,4 +186,23 @@ export function engineStatus(rep: Repertoire, it: Pick<EngineIssue, 'key' | 'san
   const flag = rep.engine[it.id];
   if (flag && flag.at > it.flag.at && flag.loss < threshold) return { state: 'done', note: 'fine after a new check' };
   return open;
+}
+
+/** A rare branch: done when you deleted it or chose to keep it; partly done when you cut it shorter. */
+export function rareStatus(rep: Repertoire, b: RareBranch, keep: KeptBranches | undefined): ItemStatus {
+  if (!movesAt(rep, b.from).some((m) => m.uci === b.uci)) return { state: 'done', note: 'deleted' };
+  if (keep?.ids.includes(rareId(b))) return { state: 'done', note: 'kept' };
+  if (pliesNow(rep, b) < b.plies) return { state: 'partial', note: 'shortened' };
+  return open;
+}
+
+const impacts = new WeakMap<Repertoire['positions'], Map<string, number>>();
+/** How much would go with the branch now (kept per version of the repertoire: the lists ask often). */
+function pliesNow(rep: Repertoire, b: RareBranch): number {
+  let m = impacts.get(rep.positions);
+  if (!m) impacts.set(rep.positions, (m = new Map()));
+  const id = rareId(b);
+  let n = m.get(id);
+  if (n === undefined) m.set(id, (n = deletionImpact(rep, b.from, b.uci).plies));
+  return n;
 }
