@@ -3255,3 +3255,38 @@ html {
 .train-choices .btn {
   align-self: flex-start;
 }
+
+/* Play: the colour of each of your moves (good, inaccuracy, mistake, blunder), in the move list and on one line under
+   the status — a line that is always there, so nothing below it moves. */
+.verdict-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-left: 3px;
+  vertical-align: 1px;
+  background: var(--faint);
+}
+.verdict-dot.good { background: #2ea043; }
+.verdict-dot.inaccuracy { background: #d4a72c; }
+.verdict-dot.mistake { background: #e8783a; }
+.verdict-dot.blunder { background: #e5484d; }
+.verdict-dot.book { background: var(--mine); }
+.verdict-text.good { color: #2ea043; }
+.verdict-text.inaccuracy { color: #b8901f; }
+.verdict-text.mistake { color: #d4692e; }
+.verdict-text.blunder { color: #e5484d; }
+.verdict-text.book { color: var(--mine); }
+.verdict-line {
+  height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Play setup: the opponent's first moves to choose from. */
+.reply-chooser .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

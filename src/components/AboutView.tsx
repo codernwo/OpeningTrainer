@@ -71,7 +71,10 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
             Practice games against Maia-3, a human-like opponent, at any rating from 600 to 2600, with or without a clock.
             Rated games give you a rating against Maia per tempo (bullet, blitz, rapid, classical), worked out like on
             Lichess and starting at 400, with a graph of how it moves; start a new run at 400 for a speedrun or a new opening.
-            A rated game you leave waits for you, with your clock running. Your games are kept: analyse them and turn your mistakes into training cards.
+            A rated game you leave waits for you, with your clock running. From any position you can practise the sidelines: untick the
+            opponent's main move and meet each other one in turn, prepared or not. The opponent can also aim at your weak spots, and
+            in casual games your moves are coloured as you play and your prepared move shows when you pick up a piece, for moves
+            you are still learning. Your games are kept: analyse them and turn your mistakes into training cards.
           </dd>
           <dt>Games</dt>
           <dd>

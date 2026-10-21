@@ -68,14 +68,18 @@ interface Props {
    *  Pass this to keep them: it is called with everything drawn after each change. */
   onDraw?: (shapes: Shape[]) => void;
   onMove?: (orig: string, dest: string) => void;
+  /** A square clicked or a piece picked up. */
+  onSelect?: (square: string) => void;
   className?: string;
 }
 
-export function Board({ position, orientation, movable, lastMove, shapes, drawn, onDraw, onMove, className }: Props) {
+export function Board({ position, orientation, movable, lastMove, shapes, drawn, onDraw, onMove, onSelect, className }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const api = useRef<Api | null>(null);
   const onMoveRef = useRef(onMove);
   onMoveRef.current = onMove;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
   const onDrawRef = useRef(onDraw);
   onDrawRef.current = onDraw;
   const drawnRef = useRef(drawn);
@@ -132,6 +136,7 @@ export function Board({ position, orientation, movable, lastMove, shapes, drawn,
       },
       movable: { free: false, showDests: true, events: { after: (o, d) => onMoveRef.current?.(o, d) } },
       premovable: { enabled: false },
+      events: { select: (sq) => onSelectRef.current?.(sq) },
     });
     return () => api.current?.destroy();
   }, []);

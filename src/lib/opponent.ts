@@ -6,6 +6,7 @@ import { fetchExplorer, getToken, RATING_BUCKETS, totalGames } from './lichess';
 import { sampleMove } from './maiaEncoding';
 import { maiaPredict } from './maia';
 import { movesAt, type Repertoire } from './repertoire';
+import { weakSpotWeights } from './weakSpots';
 
 export type MoveSource = 'repertoire' | 'database' | 'maia';
 
@@ -15,8 +16,9 @@ export interface OpponentSettings {
   /** Your own rating (Maia uses it as "who am I playing against"). */
   playerRating: number;
   /** 'repertoire': stick to your prepared lines while they last.
+   *  'weak': the same, but towards the lines you know least well (due, missed, still new).
    *  'realistic': play what people at this level actually play (may leave your prep). */
-  mode: 'repertoire' | 'realistic';
+  mode: 'repertoire' | 'weak' | 'realistic';
   speeds: string[];
 }
 
@@ -62,14 +64,22 @@ export async function chooseOpponentMove(reps: readonly Repertoire[], key: strin
   const stats = await databaseStats(key, s);
   const total = stats ? totalGames(stats) : 0;
 
-  // 1. Your prepared lines, weighted by how often people play them.
-  if (s.mode === 'repertoire' && prepared.length) {
-    const pick = weighted(
-      prepared.map((m) => {
-        const hit = stats?.moves.find((x) => x.san === m.san);
-        return { item: m, w: total ? Math.max(1, hit ? totalGames(hit) : 0) : 1 };
-      }),
-    )!;
+  // 1. Your prepared lines, weighted by how often people play them — and, aiming at your weak spots, by how little
+  //    you know what follows.
+  if ((s.mode === 'repertoire' || s.mode === 'weak') && prepared.length) {
+    const popularity = prepared.map((m) => {
+      const hit = stats?.moves.find((x) => x.san === m.san);
+      return total ? Math.max(1, hit ? totalGames(hit) : 0) : 1;
+    });
+    const sum = popularity.reduce((a, b) => a + b, 0);
+    const w =
+      s.mode === 'weak'
+        ? weakSpotWeights(
+            reps,
+            prepared.map((m, i) => ({ to: m.to, share: popularity[i] / sum })),
+          )
+        : popularity;
+    const pick = weighted(prepared.map((m, i) => ({ item: m, w: w[i] })))!;
     const move = playSan(key, pick.san);
     if (move) return { move, source: 'repertoire' };
   }

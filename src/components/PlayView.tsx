@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { formatLine, keyToFen, moveFromBoard, posFromFen, START_KEY, turnOfKey, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
+import { formatLine, keyToFen, moveFromBoard, playSan, posFromFen, START_KEY, turnOfKey, uciToArrow, type PlayedMove, type Side } from '../lib/chess';
 import { flagged, hasClock, newClock, press, resumedClock, runFor, showTime, stop, tcLabel, tcPgn, timeLeft, type ClockState, type TimeControl } from '../lib/clock';
 import { formatDate, gameId, speedFromTimeControl, type GameResult, type PlayedGame } from '../lib/games';
 import { flushGames, holdForGame, useGames, useRatings, type PlayerRatings } from '../lib/gamesStore';
@@ -11,12 +11,15 @@ import { materialDiff, type Captured } from '../lib/material';
 import { createElement } from 'react';
 import { loadMaia, MAIA_DOWNLOAD_MB, MAIA_MAX, MAIA_MIN, isMaiaDownloaded, useMaia } from '../lib/maia';
 import { chooseOpponentMove, type MoveSource, type OpponentSettings } from '../lib/opponent';
-import { findMove, movesAt, type Repertoire } from '../lib/repertoire';
+import { edgeId, findMove, movesAt, type Repertoire } from '../lib/repertoire';
+import { isLeech, State } from '../lib/srs';
+import { judge, winFor } from '../lib/analysis';
+import { evaluate } from '../lib/evaluate';
 import { ALL_IN_PLAY, scopedReps, useScopeOf, type RepScope } from '../lib/repScope';
 import { activeProfile, activeRep, profileRating, useApp, type Profile } from '../lib/store';
 import { engine } from '../lib/engine';
-import { getToken } from '../lib/lichess';
-import { Board } from './Board';
+import { fetchExplorer, getToken, totalGames } from '../lib/lichess';
+import { Board, moveArrow, type Shape } from './Board';
 import { Dialog } from './Dialog';
 import { GameReview } from './GameReview';
 import { GameRow } from './GamesView';
@@ -38,6 +41,14 @@ interface GameConfig {
   scope?: RepScope;
   /** The colour was drawn at random (and is drawn again for the next game). */
   randomColour?: boolean;
+  /** From a position where the opponent is to move: the first moves it may choose from (as often as they are
+   *  played), or — a series — one after the other, each once. */
+  firstReplies?: { san: string; w: number }[];
+  series?: { sans: string[]; index: number };
+  /** Casual help: show your prepared move when you pick up a piece (moves you are still learning), and colour
+   *  each of your moves (good, inaccuracy, mistake, blunder). */
+  hints?: boolean;
+  colours?: boolean;
 }
 
 const drawColour = (): Side => (Math.random() < 0.5 ? 'white' : 'black');
@@ -51,7 +62,7 @@ export function levelName(level: number): string {
   return 'master';
 }
 
-function readPrefs(): Partial<{ level: number; mode: OpponentSettings['mode']; coach: boolean; tc: TimeControl; rated: boolean; random: boolean }> {
+function readPrefs(): Partial<{ level: number; mode: OpponentSettings['mode']; coach: boolean; hints: boolean; colours: boolean; tc: TimeControl; rated: boolean; random: boolean }> {
   try {
     return JSON.parse(localStorage.getItem('play-prefs') ?? '{}');
   } catch {
@@ -134,7 +145,9 @@ export function PlayView() {
         onNew={() => setSession(null)}
         onRematch={() => {
           const c = session.config;
-          setSession({ config: c.randomColour ? { ...c, color: drawColour() } : c });
+          // A series goes on with the next reply (and starts again after the last).
+          const next = c.series ? { ...c, series: { ...c.series, index: (c.series.index + 1) % c.series.sans.length } } : c;
+          setSession({ config: next.randomColour ? { ...next, color: drawColour() } : next });
           setRound((r) => r + 1);
         }}
       />
@@ -558,6 +571,87 @@ function RatedSetting(props: {
   );
 }
 
+interface Reply {
+  san: string;
+  /** Share of the games in this position (Lichess database, your rating groups); 0 when not listed there. */
+  share: number;
+  prepared: boolean;
+}
+
+/** The opponent's possible moves in a position: what people play there (most played first) and what you prepared. */
+function useOpponentReplies(key: string | null, side: Side, profile: Profile, scope: RepScope): Reply[] | null {
+  const allReps = useApp((s) => s.data.repertoires);
+  const [db, setDb] = useState<{ key: string; moves: { san: string; share: number }[] } | null>(null);
+  useEffect(() => {
+    if (!key || !getToken()) return;
+    let alive = true;
+    fetchExplorer({ db: 'lichess', fen: keyToFen(key), ratings: profile.ratings, speeds: profile.speeds })
+      .then((r) => {
+        const total = totalGames(r);
+        if (alive) setDb({ key, moves: total ? r.moves.map((m) => ({ san: m.san, share: totalGames(m) / total })) : [] });
+      })
+      .catch(() => alive && setDb({ key, moves: [] }));
+    return () => {
+      alive = false;
+    };
+  }, [key, profile.ratings, profile.speeds]);
+  return useMemo(() => {
+    if (!key) return null;
+    const reps = scopedReps(allReps, profile.id, side, scope);
+    const prepared = new Set(reps.flatMap((r) => movesAt(r, key).map((m) => m.san)));
+    const fromDb = db?.key === key ? db.moves : getToken() ? null : [];
+    if (fromDb === null) return null; // still asking
+    const out: Reply[] = fromDb.map((m) => ({ ...m, prepared: prepared.has(m.san) }));
+    for (const san of prepared) if (!out.some((r) => r.san === san)) out.push({ san, share: 0, prepared: true });
+    return out.sort((a, b) => b.share - a.share);
+  }, [key, db, allReps, profile.id, side, scope]);
+}
+
+/** Which first moves the opponent may choose, and whether to meet each of them once, in a series. */
+function ReplyChooser(props: {
+  replies: Reply[] | null;
+  unticked: Set<string>;
+  onToggle: (san: string) => void;
+  series: boolean;
+  onSeries: (v: boolean) => void;
+  moveNo: number;
+}) {
+  const { replies, unticked } = props;
+  const [all, setAll] = useState(false);
+  if (!replies) return <div className="small muted">Looking up the opponent’s moves here…</div>;
+  if (!replies.length) return null;
+  // The most played ones and every prepared one; the rest on request.
+  const shown = all ? replies : replies.filter((r, i) => i < 8 || r.prepared);
+  const chosen = replies.filter((r) => !unticked.has(r.san)).length;
+  const label = (san: string) => `${Math.floor(props.moveNo / 2) + 1}${props.moveNo % 2 ? '…' : '.'}${san}`;
+  return (
+    <div className="stack reply-chooser" style={{ gap: 6 }}>
+      <div className="small muted">The opponent’s first move — untick the ones you do not want to meet (for instance the main line, to practise the sidelines):</div>
+      <div className="row wrap" style={{ gap: 6 }}>
+        {shown.map((r) => (
+          <label key={r.san} className={`chip ${unticked.has(r.san) ? '' : 'on'}`} style={{ cursor: 'pointer' }}>
+            <input type="checkbox" checked={!unticked.has(r.san)} onChange={() => props.onToggle(r.san)} style={{ margin: 0 }} />
+            <b>{label(r.san)}</b>
+            <span className="faint num">{r.share ? `${Math.round(r.share * 1000) / 10}%` : 'rare'}</span>
+            {!r.prepared && <span className="faint" title="Not in your repertoire yet: you are on your own">· not prepared</span>}
+          </label>
+        ))}
+        {!all && shown.length < replies.length && (
+          <button className="btn sm ghost" onClick={() => setAll(true)}>
+            {replies.length - shown.length} more
+          </button>
+        )}
+      </div>
+      {!getToken() && <div className="small faint">Connect Lichess (Settings) to see every move people play here, not only your prepared ones.</div>}
+      <label className="row small" style={{ gap: 6, cursor: 'pointer', fontWeight: 400 }}>
+        <input type="checkbox" checked={props.series} onChange={(e) => props.onSeries(e.target.checked)} />
+        Each one once, the most played first: a series of {chosen} {chosen === 1 ? 'game' : 'games'}
+      </label>
+      {chosen === 0 && <div className="small notice">Tick at least one move.</div>}
+    </div>
+  );
+}
+
 function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
   const rep = useApp(activeRep);
   const profile = useApp(activeProfile)!;
@@ -581,6 +675,8 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
   const scope = useScopeOf(profile.id);
   const [mode, setMode] = useState<OpponentSettings['mode']>(prefs.mode ?? 'realistic');
   const [coach, setCoach] = useState(prefs.coach ?? true);
+  const [hints, setHints] = useState(prefs.hints ?? true);
+  const [colours, setColours] = useState(prefs.colours ?? true);
   const [tc, setTc] = useState<TimeControl>(prefs.tc ?? { minutes: 0, increment: 0 });
   const [rated, setRated] = useState(prefs.rated ?? true);
   const ratings = useRatings(profile.id);
@@ -606,16 +702,27 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
     // A level taken over from a game is not remembered as your usual choice.
     localStorage.setItem(
       'play-prefs',
-      JSON.stringify({ level: setup?.level ? (prefs.level ?? level) : level, mode, coach, tc, rated, random: color === 'random' }),
+      JSON.stringify({ level: setup?.level ? (prefs.level ?? level) : level, mode, coach, hints, colours, tc, rated, random: color === 'random' }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, mode, coach, tc, rated, color]);
+  }, [level, mode, coach, hints, colours, tc, rated, color]);
+
+  // From a position where the opponent is to move: its possible first moves, to choose which ones to meet.
+  const startKey = start.at(-1)?.to ?? START_KEY;
+  const choosing = start.length > 0 && color !== 'random' && turnOfKey(startKey) !== color;
+  const replies = useOpponentReplies(choosing ? startKey : null, color === 'random' ? 'white' : color, profile, scope);
+  const [unticked, setUnticked] = useState<Set<string>>(new Set());
+  const [series, setSeries] = useState(true);
+  useEffect(() => setUnticked(new Set()), [startKey, color]);
+  const chosen = (replies ?? []).filter((r) => !unticked.has(r.san));
 
   const go = async () => {
     setError(null);
     try {
-      // Stockfish is not needed while playing; free its memory for Maia (matters on phones and tablets).
-      engine.terminate();
+      // Stockfish is not needed while playing (unless it colours your moves); free its memory for Maia (matters on
+      // phones and tablets).
+      if (isRated || !colours) engine.terminate();
+      const pickReplies = choosing && chosen.length > 0 && (series || chosen.length < (replies?.length ?? 0));
       await loadMaia();
       // Rated: the opponent plays like real opponents (not into your preparation), and no hints. Maia also takes into
       // account whom it plays; in a rated game it plays as against an equal, so "Maia 1200" is always the same
@@ -626,6 +733,13 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
         randomColour: color === 'random',
         scope,
         coach: isRated ? false : coach,
+        hints: !isRated && hints,
+        colours: !isRated && colours,
+        ...(pickReplies
+          ? series
+            ? { series: { sans: chosen.map((r) => r.san), index: 0 } }
+            : { firstReplies: chosen.map((r) => ({ san: r.san, w: Math.max(r.share, 0.01) })) }
+          : {}),
         tc,
         rated: isRated,
         settings: {
@@ -670,6 +784,23 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
               </button>
             )}
           </div>
+          {choosing && (
+            <ReplyChooser
+              replies={replies}
+              unticked={unticked}
+              onToggle={(san) =>
+                setUnticked((u) => {
+                  const n = new Set(u);
+                  if (n.has(san)) n.delete(san);
+                  else n.add(san);
+                  return n;
+                })
+              }
+              series={series}
+              onSeries={setSeries}
+              moveNo={start.length}
+            />
+          )}
         </div>
 
         <div className="field">
@@ -743,16 +874,37 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
               </div>
             </span>
           </label>
+          <label className={`row ${isRated ? 'disabled' : ''}`} style={{ alignItems: 'flex-start', cursor: isRated ? 'default' : 'pointer' }}>
+            <input type="radio" checked={!isRated && mode === 'weak'} disabled={isRated} onChange={() => setMode('weak')} style={{ marginTop: 4 }} />
+            <span>
+              <b>Aim at my weak spots</b>
+              <div className="help">
+                Also inside your repertoire, but it steers towards the lines you know least well: moves that are due, that
+                you keep missing, or that you have not learned yet.
+              </div>
+            </span>
+          </label>
           {isRated && <div className="help">In a rated game the opponent always plays like real opponents.</div>}
           {!getToken() && (
             <div className="help">Tip: connect Lichess in Settings so the opponent can use real game statistics.</div>
           )}
         </div>
 
-        <label className={`row ${isRated ? 'disabled' : ''}`} style={{ cursor: isRated ? 'default' : 'pointer' }}>
-          <input type="checkbox" checked={coach && !isRated} disabled={isRated} onChange={(e) => setCoach(e.target.checked)} />
-          Tell me when I leave my repertoire{isRated ? ' (not in rated games)' : ''}
-        </label>
+        <div className="field">
+          <label>Help during the game{isRated ? ' (not in rated games)' : ''}</label>
+          <label className={`row ${isRated ? 'disabled' : ''}`} style={{ cursor: isRated ? 'default' : 'pointer', fontWeight: 400 }}>
+            <input type="checkbox" checked={coach && !isRated} disabled={isRated} onChange={(e) => setCoach(e.target.checked)} />
+            Tell me when I leave my repertoire
+          </label>
+          <label className={`row ${isRated ? 'disabled' : ''}`} style={{ cursor: isRated ? 'default' : 'pointer', fontWeight: 400 }}>
+            <input type="checkbox" checked={hints && !isRated} disabled={isRated} onChange={(e) => setHints(e.target.checked)} />
+            Show my prepared move when I pick up a piece — only for moves I am still learning
+          </label>
+          <label className={`row ${isRated ? 'disabled' : ''}`} style={{ cursor: isRated ? 'default' : 'pointer', fontWeight: 400 }}>
+            <input type="checkbox" checked={colours && !isRated} disabled={isRated} onChange={(e) => setColours(e.target.checked)} />
+            Colour my moves: good, inaccuracy, mistake, blunder (the engine judges each move as you play)
+          </label>
+        </div>
         <div className="field">
           <RepScopePicker profileId={profile.id} side={color === 'random' ? undefined : color} label="Your repertoire:" />
           <div className="help">
@@ -772,7 +924,7 @@ function PlaySetup({ onStart }: { onStart: (g: GameConfig) => void }) {
         {(error || maia.error) && <div className="notice error small">{error || maia.error}</div>}
 
         <div className="row wrap">
-          <button className="btn primary" disabled={busy} onClick={go}>
+          <button className="btn primary" disabled={busy || (choosing && !!replies?.length && chosen.length === 0)} onClick={go}>
             <Icon name="play" size={16} />{' '}
             {busy ? 'Preparing…' : downloaded === false ? `Download Maia (±${MAIA_DOWNLOAD_MB} MB) and start` : 'Start game'}
           </button>
@@ -1023,6 +1175,62 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
   const turn = turnOfKey(key);
   const myTurn = turn === config.color;
   const coach = config.coach && !config.rated && myReps.length > 0;
+
+  // Hint: picking up a piece shows your prepared move, for the moves you are still learning (new, learning again, or
+  // a move you keep missing). What you know well, you find yourself.
+  const [hint, setHint] = useState<Shape[]>([]);
+  useEffect(() => setHint([]), [key]);
+  const onSelect = () => {
+    if (!config.hints || config.rated || !myTurn || result || thinking) return;
+    const learning = preparedAt(key).filter((m) =>
+      myReps.some((r) => {
+        const c = r.cards[edgeId(key, m.uci)];
+        return !!c && (c.state !== State.Review || isLeech(c));
+      }),
+    );
+    if (learning.length) setHint(learning.map((m) => moveArrow(m.uci, config.color)));
+  };
+
+  // Colours: each of your moves judged as you play, from the evaluation before and after it (Lichess cloud, or
+  // Stockfish in the browser at depth 14). One at a time, in order, so a later position never cuts an earlier one off.
+  const [verdicts, setVerdicts] = useState<Record<string, Verdict>>({});
+  const evalChain = useRef<Promise<unknown>>(Promise.resolve());
+  const evals = useRef(new Map<string, Promise<{ cp: number; best?: string } | null>>());
+  const evalOf = (k: string) => {
+    let p = evals.current.get(k);
+    if (!p) {
+      p = evalChain.current
+        .then(() => evaluate(k, { multiPv: 1, localDepth: 14 }))
+        .then((e) => {
+          const l = e.lines[0];
+          if (!l) return null;
+          return { cp: l.mate !== undefined ? (l.mate > 0 ? 1000 : -1000) : (l.cp ?? 0), best: l.san[0] };
+        })
+        .catch(() => null);
+      evalChain.current = p;
+      evals.current.set(k, p);
+    }
+    return p;
+  };
+  const colours = !!config.colours && !config.rated;
+  // While you think, the position is evaluated already.
+  useEffect(() => {
+    if (colours && myTurn && !result) void evalOf(key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, myTurn, result]);
+  const judgeMove = (ply: number, before: string, m: PlayedMove) => {
+    const id = verdictId(ply, m);
+    if (inRep(before, m.uci)) {
+      setVerdicts((v) => ({ ...v, [id]: { cls: 'book' } }));
+      return;
+    }
+    Promise.all([evalOf(before), evalOf(m.to)]).then(([b, a]) => {
+      if (!alive.current || !b || !a) return;
+      const loss = Math.max(0, winFor(b.cp, config.color) - winFor(a.cp, config.color));
+      const cls = judge(loss) ?? 'good';
+      setVerdicts((v) => ({ ...v, [id]: { cls, best: cls !== 'good' && b.best !== m.san ? b.best : undefined } }));
+    });
+  };
   // Still inside the repertoire: every move so far is a prepared move.
   const inBook = useMemo(() => myReps.length > 0 && moves.every((m) => inRep(m.from, m.uci)), [myReps, moves]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1086,7 +1294,13 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
     setThinking(true);
     setError(null);
     const started = Date.now();
-    chooseOpponentMove(myReps, key, config.settings)
+    // From the chosen position: the opponent's first move as chosen in the setup (a series, or one of the ticked ones).
+    const first = moves.length === config.start.length ? firstReplyOf(config) : null;
+    const firstMove = first ? playSan(key, first) : null;
+    (firstMove
+      ? Promise.resolve({ move: firstMove, source: (preparedAt(key).some((p) => p.uci === firstMove.uci) ? 'repertoire' : 'database') as MoveSource })
+      : chooseOpponentMove(myReps, key, config.settings)
+    )
       .then(async (choice) => {
         // Humans take a moment; so does this opponent (less when its clock runs low).
         const c = clockRef.current;
@@ -1096,7 +1310,9 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
         if (cancelled || !alive.current || !choice || record.current.result) return;
         const leftBook = inBook && !inRep(choice.move.from, choice.move.uci) && preparedAt(key).length > 0;
         play(choice.move, choice.source);
-        if (coach && leftBook) {
+        if (firstMove && !inRep(choice.move.from, choice.move.uci)) {
+          setNotice({ text: <>{choice.move.san}: a move you have not prepared — you are on your own. Afterwards, <b>Open in Build</b> to add your answer.</> });
+        } else if (coach && leftBook) {
           setNotice({ text: <>The opponent left your preparation with {choice.move.san} — you are on your own now.</> });
         }
       })
@@ -1119,6 +1335,7 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
         : null,
     );
     play(m, 'you');
+    if (colours) judgeMove(moves.length, key, m);
   };
 
   const flaggedOut = result?.termination === 'Time forfeit';
@@ -1181,7 +1398,9 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
             orientation={orientation}
             movable={myTurn && !result && !thinking ? config.color : null}
             lastMove={lastMove}
+            shapes={hint}
             onMove={onMove}
+            onSelect={onSelect}
           />
         </div>
         <div className="clock-bar">
@@ -1211,7 +1430,13 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
             {inBook && !config.rated && <span className="badge mine">in your repertoire</span>}
           </div>
           <OpeningLabel keys={history} />
+          {config.series && (
+            <div className="small muted">
+              Sideline {config.series.index + 1} of {config.series.sans.length}: <b>{config.series.sans[config.series.index]}</b>
+            </div>
+          )}
           <div className={`feedback ${result ? 'info' : myTurn ? 'good' : 'info'}`}>{status}</div>
+          {colours && <VerdictLine moves={moves} from={config.start.length} verdicts={verdicts} color={config.color} />}
           {result && category && ratingStep && (
             <div className="row wrap rating-result">
               <span className="muted">{CATEGORY_NAMES[category]} rating</span>
@@ -1243,7 +1468,7 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
               </button>
             </div>
           )}
-          <MoveList moves={moves} sources={sources} />
+          <MoveList moves={moves} sources={sources} verdicts={colours ? verdicts : undefined} />
           <div className="row wrap">
             {!config.rated && (
               <button className="btn" onClick={takeBack} disabled={thinking || flaggedOut || moves.length <= config.start.length}>
@@ -1259,7 +1484,12 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
               </button>
             ) : (
               <button className="btn primary" onClick={onRematch}>
-                <Icon name="refresh" size={16} /> Play again
+                <Icon name="refresh" size={16} />{' '}
+                {config.series
+                  ? config.series.index + 1 < config.series.sans.length
+                    ? `Next sideline: ${config.series.sans[config.series.index + 1]} (${config.series.index + 2} of ${config.series.sans.length})`
+                    : 'Series done ✓ — again from the first'
+                  : 'Play again'}
               </button>
             )}
             <button className="btn icon" onClick={() => setOrientation((o) => (o === 'white' ? 'black' : 'white'))} title="Flip board">
@@ -1310,7 +1540,7 @@ function GameSession({ config, resume, onNew, onRematch }: { config: GameConfig;
   );
 }
 
-function MoveList({ moves, sources }: { moves: PlayedMove[]; sources: Source[] }) {
+function MoveList({ moves, sources, verdicts }: { moves: PlayedMove[]; sources: Source[]; verdicts?: Record<string, Verdict> }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // Scroll the list itself to the newest move. (scrollIntoView would scroll the whole page too: on a phone, where the
@@ -1328,9 +1558,75 @@ function MoveList({ moves, sources }: { moves: PlayedMove[]; sources: Source[] }
         // inline-block: the list wraps between moves (nowrap spans without spaces would make one endless line).
         <span key={i} style={{ display: 'inline-block', marginRight: 6, whiteSpace: 'nowrap', opacity: sources[i] === 'start' ? 0.6 : 1 }}>
           {i % 2 === 0 && <span className="faint">{i / 2 + 1}. </span>}
-          <b>{m.san}</b> {tag(sources[i])}
+          <b>{m.san}</b>
+          {verdicts?.[verdictId(i, m)] && verdicts[verdictId(i, m)].cls !== 'book' && (
+            <i className={`verdict-dot ${verdicts[verdictId(i, m)].cls}`} title={VERDICT_NAMES[verdicts[verdictId(i, m)].cls]} />
+          )}{' '}
+          {tag(sources[i])}
         </span>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Colours for your moves while you play.
+
+type VerdictClass = 'book' | 'good' | 'inaccuracy' | 'mistake' | 'blunder';
+interface Verdict {
+  cls: VerdictClass;
+  /** The engine's move, when yours lost something. */
+  best?: string;
+}
+
+const VERDICT_NAMES: Record<VerdictClass, string> = { book: 'Book move', good: 'Good move', inaccuracy: 'Inaccuracy', mistake: 'Mistake', blunder: 'Blunder' };
+
+/** A move in a game, by its place and its squares (a move taken back and played differently is another move). */
+const verdictId = (ply: number, m: PlayedMove) => `${ply}|${m.from}|${m.uci}`;
+
+/** The first move of the opponent from the chosen position: the next one of a series, or one of the ticked ones. */
+function firstReplyOf(config: GameConfig): string | null {
+  if (config.series) return config.series.sans[config.series.index] ?? null;
+  const options = config.firstReplies;
+  if (!options?.length) return null;
+  const total = options.reduce((a, o) => a + o.w, 0);
+  let r = Math.random() * total;
+  for (const o of options) if ((r -= o.w) <= 0) return o.san;
+  return options[options.length - 1].san;
+}
+
+/** One line under the status: what your last move was worth (always there, so nothing below moves). */
+function VerdictLine({ moves, from, verdicts, color }: { moves: PlayedMove[]; from: number; verdicts: Record<string, Verdict>; color: Side }) {
+  // Your last move in this game (the moves it started from are not yours to judge).
+  let i = moves.length - 1;
+  while (i >= from && turnOfKey(moves[i].from) !== color) i--;
+  if (i < from) i = -1;
+  const v = i >= 0 ? verdicts[verdictId(i, moves[i])] : undefined;
+  const num = (ply: number) => `${Math.floor(ply / 2) + 1}${ply % 2 ? '…' : '.'}`;
+  return (
+    <div className="verdict-line small">
+      {i >= 0 && (
+        <>
+          {v ? (
+            <>
+              <i className={`verdict-dot ${v.cls}`} /> {num(i)}
+              {moves[i].san}: <b className={`verdict-text ${v.cls}`}>{VERDICT_NAMES[v.cls]}</b>
+              {v.best && (
+                <span className="muted">
+                  {' '}
+                  — {num(i)}
+                  {v.best} was better
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="faint">
+              {num(i)}
+              {moves[i].san}: judging…
+            </span>
+          )}
+        </>
+      )}
     </div>
   );
 }
