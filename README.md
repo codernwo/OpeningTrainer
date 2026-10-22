@@ -7,7 +7,7 @@ against what people at your level actually play (Lichess database), train with s
 and play practice games from any position. Bring in the **games you played** (Lichess or PGN): they are analysed on
 your device, and the mistakes you choose become cards in your own deck of mistakes.
 
-Live: <https://zeddyfree-art.github.io/chess/> · [About](https://zeddyfree-art.github.io/chess/#about) · [Privacy Policy](https://zeddyfree-art.github.io/chess/privacy.html) · [Terms of Service](https://zeddyfree-art.github.io/chess/terms.html)
+Live: <[https://codernwo.github.io/OpeningTrainer/]> 
 
 ![Build: your prepared move, the Lichess database at your rating, and the engine](docs/screenshots/build.png)
 
@@ -281,7 +281,7 @@ who does not program. So make it your own:
   describe what you want in your own words: a different training rhythm, other rating groups, your language, a new view.
 - **Keep it open.** The app is GPL-3.0: you may change it and share it; if you share a changed version, share its source
   under the same licence.
-- **Share back** what others could use, as an [issue](https://github.com/zeddyfree-art/chess/issues) or a pull request.
+- **Share back** what others could use, as an issue.
 
 ## Run locally
 
@@ -342,8 +342,6 @@ src/components/         React screens: Build, Tree, Train, Play, Check, Games, O
 ## Privacy
 
 No account, no server, no analytics: your data stays in your browser, or in your own Google Drive if you connect it.
-See the [Privacy Policy](https://zeddyfree-art.github.io/chess/privacy.html) and [Terms of Service](https://zeddyfree-art.github.io/chess/terms.html) (sources: `public/privacy.html`
-and `public/terms.html`). Contact and bug reports: [GitHub Issues](https://github.com/zeddyfree-art/chess/issues).
 
 ## Licence and credits
 
