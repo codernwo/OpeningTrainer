@@ -332,8 +332,6 @@ function SyncCard({ onRestore }: { onRestore: (d: AppData, source: string) => vo
           <div className="notice small stack" style={{ gap: 8 }}>
             <div>
               Drive sync is not set up for this site yet. The site owner creates a (free) Google OAuth client ID once — see the setup guide
-              </a>
-              .
             </div>
             <div className="row">
               <input
