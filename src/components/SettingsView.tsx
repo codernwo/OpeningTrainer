@@ -270,15 +270,6 @@ export function SettingsView() {
             or in your own Google Drive.
           </div>
           <div className="row wrap small">
-            <a href="#about">About this app</a>
-            <a href="privacy.html">Privacy Policy</a>
-            <a href="terms.html">Terms of Service</a>
-            <a href="https://github.com/zeddyfree-art/chess" target="_blank" rel="noreferrer">
-              Source code
-            </a>
-            <a href="https://github.com/zeddyfree-art/chess/issues" target="_blank" rel="noreferrer">
-              Report a problem
-            </a>
           </div>
         </div>
       </div>
@@ -340,9 +331,7 @@ function SyncCard({ onRestore }: { onRestore: (d: AppData, source: string) => vo
         {!configured ? (
           <div className="notice small stack" style={{ gap: 8 }}>
             <div>
-              Drive sync is not set up for this site yet. The site owner creates a (free) Google OAuth client ID once — see{' '}
-              <a href="https://github.com/zeddyfree-art/chess/blob/HEAD/docs/google-drive-setup.md" target="_blank" rel="noreferrer">
-                the setup guide
+              Drive sync is not set up for this site yet. The site owner creates a (free) Google OAuth client ID once — see the setup guide
               </a>
               .
             </div>
