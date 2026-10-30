@@ -1,13 +1,6 @@
 # Repertoire — build, check and train your chess openings
 
-A web app in the spirit of Chessbook, but with **no move limit**, **several players** per device, **sync
-across devices** through your own Google Drive, and a **human-like practice opponent**. Build opening
-repertoires, see all branches at a glance, prune what you don't need, check your moves with an engine and
-against what people at your level actually play (Lichess database), train with spaced repetition (FSRS),
-and play practice games from any position. Bring in the **games you played** (Lichess or PGN): they are analysed on
-your device, and the mistakes you choose become cards in your own deck of mistakes.
-
-Live: <https://zeddyfree-art.github.io/chess/> · [About](https://zeddyfree-art.github.io/chess/#about) · [Privacy Policy](https://zeddyfree-art.github.io/chess/privacy.html) · [Terms of Service](https://zeddyfree-art.github.io/chess/terms.html)
+This is a fork of the code at github.com/zeddyfree-art/chess
 
 ![Build: your prepared move, the Lichess database at your rating, and the engine](docs/screenshots/build.png)
 
@@ -342,8 +335,8 @@ src/components/         React screens: Build, Tree, Train, Play, Check, Games, O
 ## Privacy
 
 No account, no server, no analytics: your data stays in your browser, or in your own Google Drive if you connect it.
-See the [Privacy Policy](https://zeddyfree-art.github.io/chess/privacy.html) and [Terms of Service](https://zeddyfree-art.github.io/chess/terms.html) (sources: `public/privacy.html`
-and `public/terms.html`). Contact and bug reports: [GitHub Issues](https://github.com/zeddyfree-art/chess/issues).
+See the [Terms of Service](https://zeddyfree-art.github.io/chess/terms.html) (sources: `public/privacy.html`
+and `public/terms.html`). 
 
 ## Licence and credits
 
