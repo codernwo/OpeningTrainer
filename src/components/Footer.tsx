@@ -4,7 +4,7 @@ export function Footer({ className = 'site-footer' }: { className?: string }) {
     <footer className={className}>
       <a href="#about">About</a>
       <a href="terms.html">Terms of Service</a>
-      <a href="https://https://github.com/codernwo/OpeningTrainer" target="_blank" rel="noreferrer">
+      <a href="https://github.com/codernwo/OpeningTrainer" target="_blank" rel="noreferrer">
         Source code (GPL-3.0)
       </a>
     </footer>

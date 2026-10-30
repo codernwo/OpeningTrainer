@@ -27,19 +27,6 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
 
       <div className="card">
       <section className="section">
-        <h2>Why it exists</h2>
-        <p>
-          I kept my opening repertoires, and my daughter’s, in Chessbook and kept running into the move limit of the free tier. I wanted
-          something without limits that also shows what people at our own level actually play, checks our moves with an engine,
-          drills them with spaced repetition and lets us practise against an opponent that plays like a person.
-        </p>
-        <p>
-          I’m not a programmer, so I built it in plain-language conversations with Claude Code, an AI coding assistant, and made it
-          free for everyone.
-        </p>
-      </section>
-
-      <section className="section">
         <h2>What it does</h2>
         <dl className="about-list">
           <dt>Build</dt>
@@ -133,11 +120,7 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
         </p>
         <ol>
           <li>
-            Create a free GitHub account, open the{' '}
-            <a href={REPO} target="_blank" rel="noreferrer">
-              repository
-            </a>{' '}
-            and click <b>Fork</b>.
+            Create a free GitHub account, open the repository and click <b>Fork</b>.
           </li>
           <li>
             In your fork, open <b>Actions</b> and enable the workflows, then <b>Settings → Pages → Source: GitHub Actions</b>. Every
@@ -148,9 +131,7 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
             repository. Or change the code yourself: <code>npm install</code>, then <code>npm run dev</code>.
           </li>
           <li>
-            For Google Drive sync in your copy, create your own Google client ID (about ten minutes, see{' '}
-            <a href={`${REPO}/blob/HEAD/docs/google-drive-setup.md`} target="_blank" rel="noreferrer">
-              the guide
+            For Google Drive sync in your copy, create your own Google client ID (about ten minutes, see (/docs/google-drive-setup.md ) the guide
             </a>
             ). Everything else works as it is.
           </li>
@@ -172,23 +153,7 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
       </section>
 
       <section className="section">
-        <h2>Feedback</h2>
-        <p>Found a bug or have an idea? Open an issue on GitHub and mention the version below.</p>
-        <div className="row wrap about-links">
-          <a className="btn sm" href={`${REPO}/issues`} target="_blank" rel="noreferrer">
-            <Icon name="flag" size={14} /> Report a problem
-          </a>
-          <a className="btn sm ghost" href={REPO} target="_blank" rel="noreferrer">
-            <Icon name="external" size={14} /> Source code
-          </a>
-          <a className="btn sm ghost" href="privacy.html">
-            Privacy Policy
-          </a>
-          <a className="btn sm ghost" href="terms.html">
-            Terms of Service
-          </a>
-        </div>
-        <p className="small faint">
+       <p className="small faint">
           Version{' '}
           {__APP_COMMIT__ === 'local' ? (
             version
