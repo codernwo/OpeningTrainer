@@ -131,9 +131,7 @@ export function AboutView({ standalone = false }: { standalone?: boolean }) {
             repository. Or change the code yourself: <code>npm install</code>, then <code>npm run dev</code>.
           </li>
           <li>
-            For Google Drive sync in your copy, create your own Google client ID (about ten minutes, see (/docs/google-drive-setup.md ) the guide
-            </a>
-            ). Everything else works as it is.
+            For Google Drive sync in your copy, create your own Google client ID 
           </li>
         </ol>
         <p className="muted small">
